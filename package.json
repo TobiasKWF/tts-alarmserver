@@ -1,7 +1,7 @@
 {
   "name": "tts-alarmserver",
   "version": "1.0.0",
-  "description": "Modularer TTS-Alarmserver für Feuerwehr, THW, Rettungsdienst und Werkfeuerwehren",
+  "description": "Modularer TTS-Alarmserver f\u00fcr Feuerwehr, THW, Rettungsdienst und Werkfeuerwehren",
   "main": "src/server.js",
   "engines": {
     "node": ">=20.0.0"
@@ -30,6 +30,7 @@
   "license": "MIT",
   "dependencies": {
     "axios": "^1.7.2",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-rate-limit": "^7.3.1",
