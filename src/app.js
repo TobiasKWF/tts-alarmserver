@@ -45,11 +45,11 @@ function createApp() {
         directives: {
           defaultSrc:  ["'self'"],
           scriptSrc:   ["'self'", "'unsafe-inline'"],
-          // Google Fonts CSS
           styleSrc:    ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-          // Google Fonts Schriftdateien
           fontSrc:     ["'self'", 'data:', 'https://fonts.gstatic.com'],
-          connectSrc:  ["'self'"],
+          // fetch() darf an beliebige gleiche Origin gehen
+          // (IP-Adresse, Hostname – egal wie das Dashboard aufgerufen wird)
+          connectSrc:  ["'self'", '*'],
           imgSrc:      ["'self'", 'data:'],
           objectSrc:   ["'none'"],
           frameAncestors: ["'none'"],
@@ -70,7 +70,6 @@ function createApp() {
     return globalLimiter(req, res, next);
   });
 
-  // Statische Dateien: nie cachen damit index.html immer aktuell ist
   const staticOpts = { maxAge: 0, index: 'index.html' };
   const publicDir  = path.join(__dirname, '..', 'public');
 
