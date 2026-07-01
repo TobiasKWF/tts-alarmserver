@@ -8,9 +8,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    /* ===================================================================
-       DESIGN TOKENS
-    =================================================================== */
     :root {
       --font-body: 'Inter', system-ui, sans-serif;
       --text-xs:   clamp(0.75rem,  0.7rem  + 0.25vw, 0.875rem);
@@ -43,10 +40,6 @@
       --error:#cf222e;   --error-dim:#ffebe9;
       --shadow:0 4px 16px rgba(0,0,0,.08);
     }
-
-    /* ===================================================================
-       BASE
-    =================================================================== */
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased}
     body{
@@ -60,9 +53,6 @@
     :focus-visible{outline:2px solid var(--primary);outline-offset:3px;border-radius:var(--radius-sm)}
     @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
-    /* ===================================================================
-       LAYOUT
-    =================================================================== */
     .header{
       position:sticky;top:0;z-index:100;
       display:flex;align-items:center;justify-content:space-between;
@@ -74,15 +64,15 @@
     .header-title{font-size:var(--text-lg);font-weight:700;letter-spacing:-.02em}
     .header-title span{color:var(--primary)}
     .header-actions{display:flex;align-items:center;gap:var(--space-3)}
-    .ws-indicator{
+    .poll-indicator{
       display:flex;align-items:center;gap:var(--space-2);
       font-size:var(--text-xs);color:var(--text-muted);
       padding:var(--space-1) var(--space-3);
       border-radius:var(--radius-full);
       background:var(--surface-offset);border:1px solid var(--border);
     }
-    .ws-dot{width:8px;height:8px;border-radius:50%;background:var(--error);transition:background var(--transition)}
-    .ws-dot.connected{background:var(--success);animation:pulse 2s ease-in-out infinite}
+    .poll-dot{width:8px;height:8px;border-radius:50%;background:var(--error);transition:background var(--transition)}
+    .poll-dot.online{background:var(--success);animation:pulse 2s ease-in-out infinite}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
     .btn-icon{
       width:36px;height:36px;display:flex;align-items:center;justify-content:center;
@@ -91,7 +81,6 @@
       transition:background var(--transition),color var(--transition);
     }
     .btn-icon:hover{background:var(--primary-dim);color:var(--primary)}
-
     .main{
       max-width:1400px;margin:0 auto;padding:var(--space-6);
       display:grid;gap:var(--space-6);grid-template-columns:1fr;
@@ -102,10 +91,6 @@
       .card-full{grid-column:1/-1}
       .card-two{grid-column:span 2}
     }
-
-    /* ===================================================================
-       CARDS
-    =================================================================== */
     .card{
       background:var(--surface);border:1px solid var(--border);
       border-radius:var(--radius-lg);padding:var(--space-5);
@@ -117,7 +102,6 @@
       text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);
       display:flex;align-items:center;gap:var(--space-2);
     }
-    .card-title svg{opacity:.7}
     .badge{
       display:inline-flex;align-items:center;
       padding:2px var(--space-2);border-radius:var(--radius-full);
@@ -128,10 +112,6 @@
     .badge-warning{background:var(--warning-dim);color:var(--warning)}
     .badge-error{background:var(--error-dim);color:var(--error)}
     .badge-muted{background:var(--surface-offset);color:var(--text-muted)}
-
-    /* ===================================================================
-       KPI GRID
-    =================================================================== */
     .kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(200px,100%),1fr));gap:var(--space-4)}
     .kpi{
       background:var(--surface-2);border:1px solid var(--border);
@@ -141,10 +121,6 @@
     .kpi-label{font-size:var(--text-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
     .kpi-value{font-size:var(--text-xl);font-weight:700;font-variant-numeric:tabular-nums;line-height:1;transition:color var(--transition)}
     .kpi-sub{font-size:var(--text-xs);color:var(--text-muted)}
-
-    /* ===================================================================
-       AKTUELLE DURCHSAGE
-    =================================================================== */
     .current-announcement{
       background:var(--surface-2);border:1px solid var(--border);
       border-radius:var(--radius-md);padding:var(--space-4);
@@ -152,30 +128,13 @@
     }
     .current-text{font-size:var(--text-base);color:var(--text);line-height:1.6;word-break:break-word}
     .current-text.idle{color:var(--text-faint);font-style:italic}
-    .current-meta{font-size:var(--text-xs);color:var(--text-muted);display:flex;gap:var(--space-3);flex-wrap:wrap}
-    .progress-bar-wrap{height:3px;background:var(--surface-offset);border-radius:var(--radius-full);overflow:hidden}
-    .progress-bar{height:100%;background:var(--primary);border-radius:var(--radius-full);width:0%;transition:width .3s linear}
-    .progress-bar.animate{animation:indeterminate 1.4s ease-in-out infinite}
-    @keyframes indeterminate{
-      0%{transform:translateX(-100%);width:40%}
-      100%{transform:translateX(300%);width:40%}
-    }
-
-    /* ===================================================================
-       QUEUE + HISTORY
-    =================================================================== */
     .queue-list,.history-list,.error-list{
       display:flex;flex-direction:column;gap:var(--space-2);overflow-y:auto;
     }
     .queue-list{max-height:280px}
     .history-list{max-height:400px}
     .error-list{max-height:200px}
-
-    .queue-item,.history-item,.error-item{
-      border-radius:var(--radius-md);animation:slideIn .2s ease-out;
-    }
-    @keyframes slideIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
-
+    .queue-item,.history-item,.error-item{border-radius:var(--radius-md)}
     .queue-item{
       display:flex;align-items:center;gap:var(--space-3);
       padding:var(--space-2) var(--space-3);
@@ -188,8 +147,6 @@
       text-align:center;color:var(--text-faint);font-style:italic;
       font-size:var(--text-sm);padding:var(--space-6) 0;
     }
-    .history-empty{padding:var(--space-8) 0}
-
     .history-item{
       display:grid;grid-template-columns:auto 1fr auto;
       gap:var(--space-3);align-items:start;
@@ -204,17 +161,12 @@
     .history-text{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .history-meta{font-size:var(--text-xs);color:var(--text-muted);margin-top:var(--space-1);display:flex;gap:var(--space-3);flex-wrap:wrap}
     .history-time{font-size:var(--text-xs);color:var(--text-faint);white-space:nowrap}
-
     .error-item{
       padding:var(--space-2) var(--space-3);
       background:var(--error-dim);border:1px solid var(--error);
       font-size:var(--text-xs);color:var(--error);
     }
     .error-time{color:var(--text-muted);margin-right:var(--space-2)}
-
-    /* ===================================================================
-       SERVER STATUS
-    =================================================================== */
     .status-row{
       display:flex;align-items:center;justify-content:space-between;
       padding:var(--space-2) 0;border-bottom:1px solid var(--border);
@@ -223,15 +175,10 @@
     .status-row:last-child{border-bottom:none}
     .status-label{color:var(--text-muted)}
     .status-value{font-weight:500;font-variant-numeric:tabular-nums}
-
-    /* ===================================================================
-       SCROLLBAR
-    =================================================================== */
     ::-webkit-scrollbar{width:6px;height:6px}
     ::-webkit-scrollbar-track{background:transparent}
     ::-webkit-scrollbar-thumb{background:var(--border);border-radius:var(--radius-full)}
     ::-webkit-scrollbar-thumb:hover{background:var(--text-faint)}
-
     .footer{
       text-align:center;padding:var(--space-6);
       font-size:var(--text-xs);color:var(--text-faint);
@@ -254,9 +201,9 @@
     </div>
   </div>
   <div class="header-actions">
-    <div class="ws-indicator" id="wsIndicator" role="status" aria-live="polite">
-      <div class="ws-dot" id="wsDot"></div>
-      <span id="wsLabel">Verbinde…</span>
+    <div class="poll-indicator" id="pollIndicator" role="status" aria-live="polite">
+      <div class="poll-dot" id="pollDot"></div>
+      <span id="pollLabel">Verbinde…</span>
     </div>
     <button class="btn-icon" id="themeToggle" aria-label="Theme wechseln" title="Hell / Dunkel">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -268,7 +215,6 @@
 
 <main class="main" id="main">
 
-  <!-- KPI-Leiste -->
   <div class="card card-full">
     <div class="card-header">
       <div class="card-title">
@@ -287,7 +233,6 @@
     </div>
   </div>
 
-  <!-- Aktuelle Durchsage -->
   <div class="card card-two">
     <div class="card-header">
       <div class="card-title">
@@ -298,16 +243,9 @@
     </div>
     <div class="current-announcement">
       <div class="current-text idle" id="currentText">Keine aktive Durchsage.</div>
-      <div class="current-meta" id="currentMeta" style="display:none">
-        <span id="currentId"></span>
-        <span id="currentVoice"></span>
-        <span id="currentDuration"></span>
-      </div>
     </div>
-    <div class="progress-bar-wrap"><div class="progress-bar" id="progressBar"></div></div>
   </div>
 
-  <!-- Queue -->
   <div class="card">
     <div class="card-header">
       <div class="card-title">
@@ -319,7 +257,6 @@
     <div class="queue-list" id="queueList"><div class="queue-empty">Warteschlange ist leer.</div></div>
   </div>
 
-  <!-- Alarmhistorie -->
   <div class="card card-two">
     <div class="card-header">
       <div class="card-title">
@@ -331,7 +268,6 @@
     <div class="history-list" id="historyList"><div class="history-empty">Noch keine Alarmierungen.</div></div>
   </div>
 
-  <!-- Server-Info -->
   <div class="card">
     <div class="card-header">
       <div class="card-title">
@@ -344,12 +280,10 @@
       <div class="status-row"><span class="status-label">Umgebung</span><span class="status-value" id="srvEnv">--</span></div>
       <div class="status-row"><span class="status-label">PID</span><span class="status-value" id="srvPid">--</span></div>
       <div class="status-row"><span class="status-label">RTP-Ziel</span><span class="status-value" id="srvRtp">--</span></div>
-      <div class="status-row"><span class="status-label">WS-Clients</span><span class="status-value" id="srvWsClients">--</span></div>
       <div class="status-row"><span class="status-label">Queue max.</span><span class="status-value" id="srvQueueMax">--</span></div>
     </div>
   </div>
 
-  <!-- Fehlerlog -->
   <div class="card">
     <div class="card-header">
       <div class="card-title">
@@ -376,14 +310,10 @@
 // State
 // -----------------------------------------------------------------------
 const state = {
-  connected:    false,
-  wsConnected:  false,   // echte WS-Verbindung (für Label-Unterscheidung)
+  online:       false,
   totalAlarms:  0,
   failedAlarms: 0,
-  queueSize:    0,
-  currentAlarm: null,
   history:      [],
-  errors:       [],
   serverUptimeBase: null,
 };
 
@@ -406,245 +336,96 @@ function updateThemeIcon() {
 }
 
 // -----------------------------------------------------------------------
-// WebSocket mit Auto-Reconnect
+// HTTP Polling – alle 5 Sekunden /stats
 // -----------------------------------------------------------------------
-let ws             = null;
-let reconnectDelay = 1000;
-const MAX_DELAY    = 30_000;
+async function poll() {
+  try {
+    const res  = await fetch('/stats');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
 
-function wsConnect() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const url   = `${proto}://${location.host}/ws`;
+    state.online = true;
+    setStatus(true);
 
-  ws = new WebSocket(url);
-
-  ws.addEventListener('open', () => {
-    state.wsConnected = true;
-    state.connected   = true;
-    reconnectDelay    = 1000;
-    setWsStatus(true, 'Live');
-    updateKpis();
-  });
-
-  ws.addEventListener('message', (evt) => {
-    try { handleMessage(JSON.parse(evt.data)); } catch(_) {}
-  });
-
-  ws.addEventListener('close', () => {
-    state.wsConnected = false;
-    // connected bleibt true wenn fetchStats zuletzt erfolgreich war
-    if (!state.connected) {
-      setWsStatus(false, `Reconnect in ${Math.round(reconnectDelay/1000)}s…`);
-    } else {
-      setWsStatus(false, 'Polling');
-    }
-    updateKpis();
-    setTimeout(() => {
-      reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_DELAY);
-      wsConnect();
-    }, reconnectDelay);
-  });
-
-  ws.addEventListener('error', () => ws.close());
-}
-
-function setWsStatus(wsOn, label) {
-  const dot = el('wsDot');
-  // Dot grün wenn WS verbunden ODER fetchStats erfolgreich (state.connected)
-  const online = wsOn || state.connected;
-  dot.className = 'ws-dot' + (online ? ' connected' : '');
-  el('wsLabel').textContent = label;
-}
-
-// -----------------------------------------------------------------------
-// Message-Handler
-// -----------------------------------------------------------------------
-function handleMessage(msg) {
-  switch (msg.type) {
-
-    case 'snapshot': {
-      if (msg.server)    applyServer(msg.server);
-      if (msg.queue)     applyQueueStats(msg.queue);
-      if (msg.alarm)     applyAlarmStats(msg.alarm);
-      if (msg.rtp)       el('srvRtp').textContent = `${msg.rtp.host}:${msg.rtp.port}`;
-      if (msg.websocket) el('srvWsClients').textContent = msg.websocket.connectedClients ?? 0;
-      if (msg.history)   applyHistory(msg.history);
-      break;
+    // Server
+    if (data.server) {
+      const s = data.server;
+      el('srvVersion').textContent = s.version  || '--';
+      el('srvEnv').textContent     = s.nodeEnv  || '--';
+      el('srvPid').textContent     = s.pid      || '--';
+      el('kpiUptime').textContent  = s.uptimeHuman || formatUptime(s.uptime || 0);
+      el('kpiMemory').textContent  = s.memory ? s.memory.heapUsedMB + ' MB' : '--';
+      if (s.uptime != null) state.serverUptimeBase = Date.now() - s.uptime * 1000;
     }
 
-    case 'server.stats': {
-      if (msg.server)    applyServer(msg.server);
-      if (msg.queue)     applyQueueStats(msg.queue);
-      if (msg.alarm)     applyAlarmStats(msg.alarm);
-      if (msg.rtp)       el('srvRtp').textContent = `${msg.rtp.host}:${msg.rtp.port}`;
-      if (msg.websocket) el('srvWsClients').textContent = msg.websocket.connectedClients ?? 0;
-      break;
+    // Queue
+    if (data.queue) {
+      const q = data.queue;
+      const size = q.size ?? 0;
+      el('kpiQueue').textContent    = size;
+      el('queueBadge').textContent  = size;
+      el('srvQueueMax').textContent = q.maxSize ?? '--';
+      renderQueue(q.items || []);
+      if (q.failedTotal != null) state.failedAlarms = q.failedTotal;
     }
 
-    case 'alarm.started': {
-      state.currentAlarm = {
-        alarmId: msg.alarmId,
-        text:    msg.text  || '',
-        voice:   msg.voice || '',
-      };
-      setCurrentAnnouncement(state.currentAlarm, true);
-      break;
-    }
+    // Alarm
+    if (data.alarm) {
+      const a = data.alarm;
+      if (a.totalAlarms  != null) state.totalAlarms  = a.totalAlarms;
+      if (a.failedAlarms != null) state.failedAlarms = a.failedAlarms;
 
-    case 'alarm.finished': {
-      const finishedAlarm = state.currentAlarm;
-      setCurrentAnnouncement(null, false);
-      state.currentAlarm = null;
-      addHistoryItem({
-        alarmId:    msg.alarmId,
-        text:       finishedAlarm?.text || '',
-        voice:      finishedAlarm?.voice || '',
-        durationMs: msg.durationMs,
-        status:     'success',
-      });
-      updateKpis();
-      break;
-    }
-
-    case 'alarm.failed': {
-      const failedAlarm = state.currentAlarm;
-      setCurrentAnnouncement(null, false);
-      state.currentAlarm = null;
-      state.failedAlarms++;
-      addHistoryItem({
-        alarmId: msg.alarmId,
-        text:    failedAlarm?.text || '',
-        voice:   failedAlarm?.voice || '',
-        status:  'failed',
-        error:   msg.error,
-      });
-      addErrorItem({ message: msg.error || 'Alarm fehlgeschlagen', code: msg.code });
-      updateKpis();
-      break;
-    }
-
-    case 'tts.started': {
-      if (!state.currentAlarm) {
-        state.currentAlarm = { alarmId: msg.alarmId, text: '', voice: '' };
-        setCurrentAnnouncement(state.currentAlarm, true);
+      // Aktuelle Durchsage
+      if (a.current) {
+        el('currentText').textContent = a.current.text || '(Audiodatei)';
+        el('currentText').classList.remove('idle');
+        el('currentBadge').textContent = 'Aktiv';
+        el('currentBadge').className   = 'badge badge-success';
+      } else {
+        el('currentText').textContent = 'Keine aktive Durchsage.';
+        el('currentText').classList.add('idle');
+        el('currentBadge').textContent = 'Idle';
+        el('currentBadge').className   = 'badge badge-muted';
       }
-      break;
     }
 
-    case 'stream.finished': {
-      el('progressBar').classList.remove('animate');
-      break;
+    // RTP
+    if (data.rtp) {
+      el('srvRtp').textContent = data.rtp.host + ':' + data.rtp.port;
     }
 
-    case 'tts.error':
-    case 'stream.error': {
-      addErrorItem({ message: msg.error || msg.type, code: msg.type });
-      break;
+    // History
+    if (Array.isArray(data.history)) {
+      state.history = data.history;
+      renderHistory(state.history);
     }
 
-    case 'queue.changed': {
-      applyQueueItems(msg.items || []);
-      break;
-    }
+    // KPIs
+    el('kpiTotal').textContent  = state.totalAlarms;
+    el('kpiErrors').textContent = state.failedAlarms;
+    el('lastUpdate').textContent = new Date().toLocaleTimeString('de-DE');
 
-    case 'queue.empty': {
-      applyQueueItems([]);
-      break;
-    }
-  }
-
-  el('lastUpdate').textContent = new Date().toLocaleTimeString('de-DE');
-}
-
-// -----------------------------------------------------------------------
-// Apply-Funktionen
-// -----------------------------------------------------------------------
-function applyServer(server) {
-  el('srvVersion').textContent  = server.version  || '--';
-  el('srvEnv').textContent      = server.nodeEnv  || '--';
-  el('srvPid').textContent      = server.pid      || '--';
-  el('kpiUptime').textContent   = server.uptimeHuman || formatUptime(server.uptime || 0);
-  el('kpiMemory').textContent   = server.memory ? `${server.memory.heapUsedMB} MB` : '--';
-  if (server.uptime != null) {
-    state.serverUptimeBase = Date.now() - server.uptime * 1000;
+  } catch (err) {
+    state.online = false;
+    setStatus(false);
   }
 }
 
-function applyQueueStats(queue) {
-  const size = queue.size ?? 0;
-  state.queueSize = size;
-  el('kpiQueue').textContent    = size;
-  el('queueBadge').textContent  = size;
-  el('srvQueueMax').textContent = queue.maxSize ?? '--';
-  if (queue.items) renderQueue(queue.items);
-  if (queue.failedTotal != null) state.failedAlarms = queue.failedTotal;
-}
-
-function applyAlarmStats(alarm) {
-  if (alarm.totalAlarms  != null) state.totalAlarms  = alarm.totalAlarms;
-  if (alarm.failedAlarms != null) state.failedAlarms = alarm.failedAlarms;
-  updateKpis();
-}
-
-function applyHistory(items) {
-  state.history = Array.isArray(items) ? [...items] : [];
-  renderHistory(state.history);
-}
-
-function applyQueueItems(items) {
-  const size = Array.isArray(items) ? items.length : 0;
-  state.queueSize = size;
-  el('kpiQueue').textContent   = size;
-  el('queueBadge').textContent = size;
-  renderQueue(items);
+function setStatus(online) {
+  el('pollDot').className   = 'poll-dot' + (online ? ' online' : '');
+  el('pollLabel').textContent = online ? 'Online' : 'Offline';
+  el('kpiStatus').textContent = online ? 'Online' : 'Offline';
+  el('kpiStatus').style.color = online ? 'var(--success)' : 'var(--error)';
 }
 
 // -----------------------------------------------------------------------
-// KPIs
-// -----------------------------------------------------------------------
-function updateKpis() {
-  el('kpiTotal').textContent  = state.totalAlarms;
-  el('kpiErrors').textContent = state.failedAlarms;
-  el('kpiStatus').textContent = state.connected ? 'Online' : 'Offline';
-  el('kpiStatus').style.color = state.connected ? 'var(--success)' : 'var(--error)';
-}
-
 // Lokaler Uptime-Ticker
+// -----------------------------------------------------------------------
 setInterval(() => {
   if (state.serverUptimeBase == null) return;
   const elapsed = Math.floor((Date.now() - state.serverUptimeBase) / 1000);
   el('kpiUptime').textContent = formatUptime(elapsed);
 }, 1000);
-
-// -----------------------------------------------------------------------
-// Aktuelle Durchsage
-// -----------------------------------------------------------------------
-function setCurrentAnnouncement(data, active) {
-  const textEl  = el('currentText');
-  const metaEl  = el('currentMeta');
-  const barEl   = el('progressBar');
-  const badgeEl = el('currentBadge');
-
-  if (active && data) {
-    textEl.textContent = data.text || '(Audiodatei)';
-    textEl.classList.remove('idle');
-    el('currentId').textContent    = `ID: ${String(data.alarmId || '').slice(0,8)}…`;
-    el('currentVoice').textContent = data.voice ? `Stimme: ${data.voice}` : '';
-    el('currentDuration').textContent = '';
-    metaEl.style.display = 'flex';
-    barEl.classList.add('animate');
-    badgeEl.textContent = 'Aktiv';
-    badgeEl.className   = 'badge badge-success';
-  } else {
-    textEl.textContent = 'Keine aktive Durchsage.';
-    textEl.classList.add('idle');
-    metaEl.style.display = 'none';
-    barEl.classList.remove('animate');
-    barEl.style.width = '0%';
-    badgeEl.textContent = 'Idle';
-    badgeEl.className   = 'badge badge-muted';
-  }
-}
 
 // -----------------------------------------------------------------------
 // Queue-Rendering
@@ -667,21 +448,6 @@ function renderQueue(items) {
 // -----------------------------------------------------------------------
 // History-Rendering
 // -----------------------------------------------------------------------
-function addHistoryItem(data) {
-  const entry = {
-    alarmId:    data.alarmId,
-    text:       data.text   || '(unbekannt)',
-    voice:      data.voice  || '',
-    status:     data.status || (data.error ? 'failed' : 'success'),
-    error:      data.error  || null,
-    durationMs: data.durationMs || null,
-    finishedAt: new Date().toISOString(),
-  };
-  state.history.unshift(entry);
-  if (state.history.length > 100) state.history.pop();
-  renderHistory(state.history);
-}
-
 function renderHistory(items) {
   const list = el('historyList');
   el('historyBadge').textContent = items.length;
@@ -691,7 +457,7 @@ function renderHistory(items) {
   }
   list.innerHTML = items.slice(0, 50).map(item => `
     <div class="history-item">
-      <div class="history-status ${item.error || item.status === 'failed' ? 'error' : 'ok'}"></div>
+      <div class="history-status ${item.status === 'failed' || item.error ? 'error' : 'ok'}"></div>
       <div class="history-body">
         <div class="history-text">${esc(item.text || '(Audiodatei)')}</div>
         <div class="history-meta">
@@ -705,72 +471,6 @@ function renderHistory(items) {
     </div>
   `).join('');
 }
-
-// -----------------------------------------------------------------------
-// Error-Log
-// -----------------------------------------------------------------------
-function addErrorItem(data) {
-  state.errors.unshift({
-    message: data.message || String(data),
-    code:    data.code || null,
-    time:    new Date().toISOString(),
-  });
-  if (state.errors.length > 20) state.errors.pop();
-  renderErrors();
-}
-
-function renderErrors() {
-  const list = el('errorList');
-  el('errorBadge').textContent = state.errors.length;
-  if (state.errors.length === 0) {
-    list.innerHTML = '<div class="error-empty">Keine Fehler.</div>';
-    return;
-  }
-  list.innerHTML = state.errors.map(e => `
-    <div class="error-item">
-      <span class="error-time">${formatTime(e.time)}</span>
-      ${e.code ? `[${esc(e.code)}] ` : ''}${esc(e.message)}
-    </div>
-  `).join('');
-}
-
-// -----------------------------------------------------------------------
-// Statistik-Polling als Fallback (alle 15s)
-// Setzt state.connected = true sobald /stats erreichbar ist,
-// damit kpiStatus "Online" zeigt auch wenn WebSocket nicht verbindet.
-// -----------------------------------------------------------------------
-async function fetchStats() {
-  try {
-    const res  = await fetch('/stats');
-    if (!res.ok) return;
-    const data = await res.json();
-
-    // Server ist erreichbar → connected = true (Fallback für WS-Ausfall)
-    if (!state.connected) {
-      state.connected = true;
-      setWsStatus(state.wsConnected, state.wsConnected ? 'Live' : 'Polling');
-      updateKpis();
-    }
-
-    if (data.server)  applyServer(data.server);
-    if (data.queue)   applyQueueStats(data.queue);
-    if (data.alarm)   applyAlarmStats(data.alarm);
-    if (data.rtp)     el('srvRtp').textContent = `${data.rtp.host}:${data.rtp.port}`;
-    if (data.websocket) el('srvWsClients').textContent = data.websocket.connectedClients ?? 0;
-    if (data.history) applyHistory(data.history);
-
-    el('lastUpdate').textContent = new Date().toLocaleTimeString('de-DE');
-  } catch (_) {
-    // Fetch fehlgeschlagen – nur Offline setzen wenn auch WS weg ist
-    if (!state.wsConnected) {
-      state.connected = false;
-      setWsStatus(false, 'Offline');
-      updateKpis();
-    }
-  }
-}
-
-setInterval(fetchStats, 15_000);
 
 // -----------------------------------------------------------------------
 // Hilfsfunktionen
@@ -802,10 +502,9 @@ function formatUptime(seconds) {
 // -----------------------------------------------------------------------
 // Init
 // -----------------------------------------------------------------------
-wsConnect();
-fetchStats();   // sofort beim Laden aufrufen – zeigt sofort Online
-updateKpis();
 updateThemeIcon();
+poll();                          // sofort beim Laden
+setInterval(poll, 5000);         // dann alle 5 Sekunden
 
 }());
 </script>
