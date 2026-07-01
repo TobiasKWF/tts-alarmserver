@@ -294,8 +294,7 @@ btnFanfare.addEventListener('click', async () => {
   btnFanfareLabel.textContent = 'Spiele…';
 
   try {
-    // Korrekte Route: POST /announce/fanfare
-    const res = await fetch('/announce/fanfare', {
+    const res = await fetch('/play-fanfare', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ file: FANFARE_FILE }),
@@ -317,13 +316,12 @@ btnFanfare.addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Polling: /stats + /history parallel alle 2 Sekunden
+// Polling: /stats + /stats/history parallel alle 2 Sekunden
 // ---------------------------------------------------------------------------
 async function poll() {
-  // Beide Endpunkte parallel abrufen
   const [statsRes, histRes] = await Promise.allSettled([
-    fetch('/stats',   { cache: 'no-store' }),
-    fetch('/history?limit=100', { cache: 'no-store' }),
+    fetch('/stats',                    { cache: 'no-store' }),
+    fetch('/stats/history?limit=100',  { cache: 'no-store' }),
   ]);
 
   // --- /stats ---
@@ -351,7 +349,7 @@ async function poll() {
   el('srvQueueMax').textContent = q.maxSize ?? '--';
   renderQueue(Array.isArray(q.items) ? q.items : []);
 
-  // Alarm-Stats — NUR alarm.failedAlarms verwenden (queue.failedTotal zählt anders)
+  // Alarm-Stats
   const a = data.alarm || {};
   if (a.totalAlarms  != null) state.totalAlarms  = a.totalAlarms;
   if (a.failedAlarms != null) state.failedAlarms = a.failedAlarms;
@@ -386,7 +384,7 @@ async function poll() {
   el('kpiErrors').textContent = state.failedAlarms;
   el('lastUpdate').textContent = new Date().toLocaleTimeString('de-DE');
 
-  // --- /history ---
+  // --- /stats/history ---
   if (histRes.status === 'fulfilled' && histRes.value.ok) {
     const hdata = await histRes.value.json();
     const items = Array.isArray(hdata.history) ? hdata.history : [];
@@ -402,7 +400,6 @@ function setStatus(online) {
   el('kpiStatus').style.color  = online ? 'var(--success)' : 'var(--error)';
 }
 
-// Lokaler Uptime-Ticker
 setInterval(() => {
   if (state.serverUptimeBase == null) return;
   const elapsed = Math.floor((Date.now() - state.serverUptimeBase) / 1000);
