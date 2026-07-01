@@ -3,27 +3,52 @@
 /**
  * @file app.js
  * @description Express Application Factory.
+ *
  * Erstellt und konfiguriert die Express-Anwendung ohne sie zu starten.
- * Trennt Application-Setup von Server-Lifecycle.
+ * Trennt Application-Setup von Server-Lifecycle sauber.
+ *
+ * Middleware-Reihenfolge (Reihenfolge ist semantisch relevant):
+ *   1.  trust proxy          – korrekte IPs hinter Nginx/Traefik
+ *   2.  CORS                 – vor allem anderen, damit OPTIONS korrekt beantwortet wird
+ *   3.  Helmet               – Sicherheits-Header
+ *   4.  Body-Parser          – JSON + URL-encoded
+ *   5.  Sanitize             – nach Body-Parser, vor RequestId
+ *   6.  RequestId            – UUID pro Request, Header-Propagation
+ *   7.  RequestLogger        – strukturiertes HTTP-Logging
+ *   8.  Global Rate-Limiter  – Schutz aller Endpunkte
+ *   9.  Static Files         – Dashboard
+ *  10.  Routes               – mit route-spezifischen Limitern und Auth
+ *  11.  404 Handler
+ *  12.  Error Handler        – muss letzter sein
  */
 
 const express = require('express');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const path = require('path');
+const helmet  = require('helmet');
+const path    = require('path');
 
 const config = require('./config');
 const logger = require('./utils/logger');
-const { requestIdMiddleware } = require('./middleware/requestId');
-const { requestLogger } = require('./middleware/requestLogger');
-const { errorHandler } = require('./middleware/errorHandler');
-const { notFoundHandler } = require('./middleware/notFoundHandler');
-const { apiKeyAuth } = require('./middleware/apiKeyAuth');
-const announceRoutes = require('./routes/announce');
-const diveraRoutes = require('./routes/divera');
-const healthRoutes = require('./routes/health');
-const statsRoutes = require('./routes/stats');
-const voiceRoutes = require('./routes/voices');
+
+// Middleware – alles über den Barrel-Export
+const {
+  requestId,
+  requestLogger,
+  errorHandler,
+  notFoundHandler,
+  apiKeyAuth,
+  globalLimiter,
+  announceLimiter,
+  diveraLimiter,
+  corsMiddleware,
+  sanitize,
+} = require('./middleware');
+
+// Routes
+const announceRouter = require('./routes/announce');
+const diveraRouter   = require('./routes/divera');
+const healthRouter   = require('./routes/health');
+const statsRouter    = require('./routes/stats');
+const voicesRouter   = require('./routes/voices');
 
 /**
  * Erstellt und konfiguriert die Express-Anwendung.
@@ -32,69 +57,120 @@ const voiceRoutes = require('./routes/voices');
 function createApp() {
   const app = express();
 
-  // --- Sicherheits-Header ---
+  // --- 1. Trust Proxy ---
+  // Nötig für korrekte req.ip hinter Nginx, Traefik, Caddy etc.
+  // Wert 1 = genau einem vorgelagerten Proxy vertrauen.
+  app.set('trust proxy', 1);
+
+  // --- 2. CORS ---
+  // Muss vor allem anderen kommen, damit OPTIONS-Preflight-Requests
+  // sofort beantwortet werden (vor Helmet, Auth usw.).
+  app.use(corsMiddleware);
+  app.options('*', corsMiddleware); // Explizit alle Preflight-Requests behandeln
+
+  // --- 3. Sicherheits-Header (Helmet) ---
   app.use(
     helmet({
       contentSecurityPolicy: {
         directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          connectSrc: ["'self'", 'ws:', 'wss:'],
-          imgSrc: ["'self'", 'data:'],
+          defaultSrc:  ["'self'"],
+          scriptSrc:   ["'self'", "'unsafe-inline'"],
+          styleSrc:    ["'self'", "'unsafe-inline'"],
+          // WebSocket für das Live-Dashboard erlauben
+          connectSrc:  ["'self'", 'ws:', 'wss:'],
+          imgSrc:      ["'self'", 'data:'],
+          fontSrc:     ["'self'", 'data:'],
+          objectSrc:   ["'none'"],
+          frameAncestors: ["'none'"],
         },
       },
+      crossOriginEmbedderPolicy: false, // Sonst schlägt WebSocket-Upgrade fehl
     })
   );
 
-  // --- Body-Parser ---
+  // --- 4. Body-Parser ---
+  // Limit auf 1 MB – TTS-Texte sind kurz, große Payloads abweisen.
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-  // --- Request-ID (muss vor allen anderen Middlewares kommen) ---
-  app.use(requestIdMiddleware);
+  // --- 5. Eingabe-Sanitisierung ---
+  // Nach dem Body-Parser, vor RequestId, damit req.body sauber ist.
+  app.use(sanitize);
 
-  // --- HTTP-Request-Logging via Morgan → Winston ---
-  app.use(
-    morgan('combined', {
-      stream: {
-        write: (message) => logger.http(message.trim()),
-      },
-      skip: (req) => req.url === '/health',
-    })
-  );
+  // --- 6. Request-ID ---
+  // Muss früh kommen, damit Logger und Services die ID nutzen können.
+  app.use(requestId);
 
-  // --- Strukturiertes Request-Logging ---
+  // --- 7. HTTP-Request-Logging ---
   app.use(requestLogger);
 
-  // --- Statische Dateien (Dashboard) ---
+  // --- 8. Globaler Rate-Limiter ---
+  // Gilt für alle Endpunkte (Health ist intern ausgenommen).
+  app.use(globalLimiter);
+
+  // --- 9. Statische Dateien (Dashboard) ---
   app.use(
     '/dashboard',
     express.static(path.join(__dirname, '..', 'public'), {
       maxAge: config.server.nodeEnv === 'production' ? '1h' : 0,
+      index: 'index.html',
     })
   );
 
-  // --- Root Redirect auf Dashboard ---
-  app.get('/', (req, res) => {
+  // --- Root-Redirect auf Dashboard ---
+  app.get('/', (_req, res) => {
     res.redirect('/dashboard');
   });
 
-  // --- API Routes ---
-  // Health und Stats sind öffentlich zugänglich
-  app.use('/health', healthRoutes);
-  app.use('/stats', statsRoutes);
+  // --- 10. API-Routes ---
 
-  // Alle weiteren API-Routen erfordern ggf. API-Key-Authentifizierung
-  app.use('/announce', apiKeyAuth, announceRoutes);
-  app.use('/divera', apiKeyAuth, diveraRoutes);
-  app.use('/voices', voiceRoutes);
+  // Health-Check: öffentlich, kein Rate-Limit, kein Auth
+  app.use('/health', healthRouter);
 
-  // --- 404 Handler ---
+  // Stats & History: öffentlich lesbar, globaler Limiter genügt
+  app.use('/stats', statsRouter);
+
+  // Announce: API-Key-Auth + eigener Limiter
+  app.use('/announce',    apiKeyAuth, announceLimiter, announceRouter);
+
+  // Play-Fanfare: gleiche Absicherung wie /announce
+  // Die Route /play-fanfare ist im announceRouter als POST /fanfare registriert.
+  // Hier mounten wir den Router nochmals unter /play-fanfare für die API-Kompatibilität:
+  app.post('/play-fanfare', apiKeyAuth, announceLimiter, (req, res, next) => {
+    // Intern an /fanfare im announceRouter weiterleiten
+    req.url = '/fanfare';
+    announceRouter(req, res, next);
+  });
+
+  // Divera-Webhook: eigener Limiter, kein API-Key (Webhooks haben eigene Auth)
+  app.use('/divera', diveraLimiter, diveraRouter);
+
+  // Voices: GET öffentlich, POST nur mit API-Key (wird intern im Router geprüft)
+  app.use('/voices', voicesRouter);
+
+  // Alias /voice für POST (API-Kompatibilität)
+  app.use('/voice', voicesRouter);
+
+  // --- 11. 404 Handler ---
   app.use(notFoundHandler);
 
-  // --- Zentraler Error Handler (muss letzter Middleware sein) ---
+  // --- 12. Zentraler Error-Handler (MUSS letzter sein) ---
   app.use(errorHandler);
+
+  logger.info('Express-App konfiguriert', {
+    env: config.server.nodeEnv,
+    routes: [
+      'GET  /health',
+      'GET  /stats',
+      'GET  /stats/history',
+      'POST /announce',
+      'POST /play-fanfare',
+      'POST /divera',
+      'GET  /voices',
+      'POST /voice',
+      'GET  /dashboard',
+    ],
+  });
 
   return app;
 }
