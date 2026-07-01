@@ -29,7 +29,7 @@ set -euo pipefail
 # Konfiguration – hier anpassen
 # -----------------------------------------------------------------------------
 REPO_URL="https://github.com/TobiasKWF/tts-alarmserver.git"
-INSTALL_DIR="/tts-alarmserver"
+INSTALL_DIR="/opt/tts-alarmserver"
 SERVICE_USER="root"                       # In Produktion eigenen User anlegen
 NODE_VERSION="22"                         # Node.js LTS Major-Version
 PIPER_VERSION="2023.11.14-2"             # Piper Release-Tag
