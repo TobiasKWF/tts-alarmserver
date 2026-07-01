@@ -489,8 +489,8 @@ main() {
   install_system_packages
   install_nodejs
   install_piper
-  install_voice
   install_repository
+  install_voice
   install_npm_packages
   create_directories
   create_env_file
