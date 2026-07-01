@@ -2,28 +2,44 @@
 
 /**
  * @file services/queueService.js
- * @description Prioritäts-Warteschlange für Alarmierungen.
- * Verwaltet eingehende Alarme, verarbeitet sie sequenziell
- * und emittiert queue.changed / queue.empty Events.
+ * @description Priorisierte Alarm-Warteschlange.
+ * Verarbeitet Alarmierungen seriell und stellt sicher, dass immer
+ * nur eine Durchsage gleichzeitig läuft. Unterstützt Prioritäten 1–10.
  */
 
+const { EventEmitter } = require('events');
 const logger = require('../utils/logger').child({ service: 'QueueService' });
 const eventBus = require('../events/eventBus');
 const config = require('../config');
+const { QueueFullError } = require('../errors');
 
-/** @typedef {{ id: string, priority: number, payload: object, receivedAt: string }} QueueItem */
+/**
+ * @typedef {object} QueueEntry
+ * @property {string} id - Eindeutige Alarm-ID
+ * @property {number} priority - Priorität 1 (niedrig) – 10 (kritisch)
+ * @property {number} createdAt - Timestamp (ms) der Einreihung
+ * @property {object} payload - Alarm-Nutzdaten
+ */
 
-class QueueService {
+class QueueService extends EventEmitter {
   /** @type {QueueService|null} */
   static #instance = null;
 
+  /** @type {QueueEntry[]} */
+  #queue = [];
+
+  /** @type {boolean} */
+  #running = false;
+
+  /** @type {boolean} */
+  #processing = false;
+
+  /** @type {object|null} */
+  #alarmService = null;
+
   constructor() {
-    /** @type {QueueItem[]} */
-    this._queue = [];
-    this._processing = false;
-    this._stopped = false;
-    /** @type {AlarmService|null} */
-    this._alarmService = null;
+    super();
+    this.setMaxListeners(20);
   }
 
   /**
@@ -38,125 +54,100 @@ class QueueService {
   }
 
   /**
-   * Setzt den AlarmService (Dependency Injection).
-   * @param {object} alarmService
+   * Fügt einen Alarm in die Warteschlange ein.
+   * Höhere Priorität wird weiter vorne in der Queue einsortiert.
+   *
+   * @param {object} payload - Alarm-Nutzdaten
+   * @param {string} payload.id - Eindeutige ID
+   * @param {number} [payload.priority=5] - Priorität 1–10
+   * @throws {QueueFullError} wenn die Queue die maximale Größe erreicht hat
+   * @returns {QueueEntry}
    */
-  setAlarmService(alarmService) {
-    this._alarmService = alarmService;
+  enqueue(payload) {
+    const maxSize = config.queue.maxSize;
+    if (this.#queue.length >= maxSize) {
+      logger.warn('Queue voll – Alarm abgelehnt', {
+        alarmId: payload.id,
+        queueSize: this.#queue.length,
+        maxSize,
+      });
+      throw new QueueFullError(maxSize);
+    }
+
+    const entry = {
+      id: payload.id,
+      priority: Math.min(Math.max(payload.priority || config.queue.defaultPriority, 1), 10),
+      createdAt: Date.now(),
+      payload,
+    };
+
+    // Einsortieren nach Priorität (höher = weiter vorne), dann nach createdAt (FIFO)
+    const insertIdx = this.#queue.findIndex(
+      (e) => e.priority < entry.priority
+    );
+    if (insertIdx === -1) {
+      this.#queue.push(entry);
+    } else {
+      this.#queue.splice(insertIdx, 0, entry);
+    }
+
+    logger.info('Alarm in Queue eingereiht', {
+      alarmId: entry.id,
+      priority: entry.priority,
+      queueSize: this.#queue.length,
+      position: insertIdx === -1 ? this.#queue.length : insertIdx + 1,
+    });
+
+    eventBus.emit('queue.changed', {
+      size: this.#queue.length,
+      entries: this._getPublicQueue(),
+    });
+
+    this._tryProcess();
+
+    return entry;
   }
 
   /**
-   * Startet den Queue-Worker mit dem AlarmService.
-   * @param {object} alarmService
+   * Entfernt einen Alarm aus der Queue (nur wenn noch nicht in Verarbeitung).
+   * @param {string} id
+   * @returns {boolean}
+   */
+  remove(id) {
+    const idx = this.#queue.findIndex((e) => e.id === id);
+    if (idx === -1) return false;
+    this.#queue.splice(idx, 1);
+    logger.info('Alarm aus Queue entfernt', { alarmId: id });
+    eventBus.emit('queue.changed', {
+      size: this.#queue.length,
+      entries: this._getPublicQueue(),
+    });
+    return true;
+  }
+
+  /**
+   * Startet den Queue-Worker.
+   * @param {object} alarmService - AlarmService-Instanz
    */
   startWorker(alarmService) {
-    this._alarmService = alarmService;
+    this.#alarmService = alarmService;
+    this.#running = true;
     logger.info('Queue-Worker gestartet.');
   }
 
   /**
-   * Fügt eine Alarmierung in die Warteschlange ein.
-   * Sortiert nach Priorität (niedrigerer Wert = höhere Priorität).
-   * @param {string} id - Eindeutige Alarm-ID (UUID)
-   * @param {object} payload - Alarm-Nutzlast
-   * @param {number} [priority] - Priorität (1=höchste, 10=niedrigste)
-   * @returns {QueueItem}
-   * @throws {QueueFullError}
+   * Stoppt den Worker sauber.
    */
-  enqueue(id, payload, priority) {
-    const { QueueFullError } = require('../errors');
-    const maxSize = config.queue.maxSize;
-
-    if (this._queue.length >= maxSize) {
-      logger.warn('Queue voll – Alarm abgelehnt', { id, queueSize: this._queue.length });
-      throw new QueueFullError(maxSize);
+  async stop() {
+    this.#running = false;
+    logger.info('Queue-Worker wird gestoppt...', { pending: this.#queue.length });
+    // Warten bis laufende Verarbeitung endet (max. 30 Sek.)
+    const deadline = Date.now() + 30_000;
+    while (this.#processing && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
     }
-
-    const effectivePriority = (typeof priority === 'number' && priority >= 1 && priority <= 10)
-      ? priority
-      : config.queue.defaultPriority;
-
-    /** @type {QueueItem} */
-    const item = {
-      id,
-      priority: effectivePriority,
-      payload,
-      receivedAt: new Date().toISOString(),
-    };
-
-    this._queue.push(item);
-    // Stabile Sortierung nach Priorität (aufsteigend = höhere Wichtigkeit zuerst)
-    this._queue.sort((a, b) => a.priority - b.priority);
-
-    logger.info('Alarm in Queue eingereiht', {
-      id,
-      priority: effectivePriority,
-      queueSize: this._queue.length,
-    });
-
-    eventBus.emit('queue.changed', {
-      queueSize: this._queue.length,
-      items: this._getPublicQueueSnapshot(),
-    });
-
-    // Worker anstoßen (falls nicht bereits aktiv)
-    setImmediate(() => this._processNext());
-
-    return item;
-  }
-
-  /**
-   * Gibt eine öffentliche Übersicht der Queue zurück (ohne interne Details).
-   * @returns {Array<{id: string, priority: number, receivedAt: string}>}
-   */
-  _getPublicQueueSnapshot() {
-    return this._queue.map(({ id, priority, receivedAt }) => ({ id, priority, receivedAt }));
-  }
-
-  /**
-   * Verarbeitet den nächsten Alarm in der Queue.
-   * Wird nach jedem Enqueue und nach jeder abgeschlossenen Verarbeitung aufgerufen.
-   */
-  async _processNext() {
-    if (this._processing || this._stopped || this._queue.length === 0) {
-      if (this._queue.length === 0 && !this._processing) {
-        eventBus.emit('queue.empty', {});
-      }
-      return;
-    }
-
-    this._processing = true;
-    const item = this._queue.shift();
-
-    logger.info('Alarm-Verarbeitung gestartet', { id: item.id, priority: item.priority });
-
-    eventBus.emit('queue.changed', {
-      queueSize: this._queue.length,
-      items: this._getPublicQueueSnapshot(),
-      current: { id: item.id, priority: item.priority },
-    });
-
-    try {
-      if (!this._alarmService) {
-        throw new Error('AlarmService nicht gesetzt');
-      }
-      await this._alarmService.process(item);
-      logger.info('Alarm-Verarbeitung abgeschlossen', { id: item.id });
-    } catch (err) {
-      logger.error('Fehler bei der Alarm-Verarbeitung', {
-        id: item.id,
-        error: err.message,
-        stack: err.stack,
-      });
-      eventBus.emit('alarm.failed', {
-        id: item.id,
-        error: err.message,
-      });
-    } finally {
-      this._processing = false;
-      // Nächsten Eintrag verarbeiten
-      setImmediate(() => this._processNext());
-    }
+    this.#queue = [];
+    logger.info('Queue-Worker gestoppt.');
   }
 
   /**
@@ -164,39 +155,64 @@ class QueueService {
    * @returns {number}
    */
   get size() {
-    return this._queue.length;
+    return this.#queue.length;
   }
 
   /**
-   * Gibt true zurück wenn die Queue gerade verarbeitet wird.
-   * @returns {boolean}
+   * Gibt die aktuelle Queue als öffentliche (bereinigt) Liste zurück.
+   * @returns {Array}
    */
-  get isProcessing() {
-    return this._processing;
+  _getPublicQueue() {
+    return this.#queue.map((e) => ({
+      id: e.id,
+      priority: e.priority,
+      createdAt: e.createdAt,
+      text: e.payload.text,
+      source: e.payload.source || 'api',
+    }));
   }
 
   /**
-   * Gibt eine Kopie der aktuellen Queue zurück.
-   * @returns {QueueItem[]}
+   * Interne Methode: Startet die Verarbeitung wenn nicht bereits aktiv.
    */
-  getQueue() {
-    return [...this._queue];
-  }
+  async _tryProcess() {
+    if (this.#processing || !this.#running || this.#queue.length === 0) return;
+    if (!this.#alarmService) {
+      logger.warn('Kein AlarmService gesetzt – Queue wird nicht verarbeitet.');
+      return;
+    }
 
-  /**
-   * Stoppt den Worker und leert die Queue.
-   */
-  async stop() {
-    this._stopped = true;
-    this._queue = [];
-    logger.info('QueueService gestoppt.');
-  }
+    this.#processing = true;
 
-  /**
-   * Setzt die Singleton-Instanz zurück (nur für Tests).
-   */
-  static _reset() {
-    QueueService.#instance = null;
+    while (this.#running && this.#queue.length > 0) {
+      const entry = this.#queue.shift();
+
+      eventBus.emit('queue.changed', {
+        size: this.#queue.length,
+        entries: this._getPublicQueue(),
+        processing: entry.id,
+      });
+
+      try {
+        await this.#alarmService.process(entry.payload);
+      } catch (err) {
+        logger.error('Fehler bei der Alarmverarbeitung', {
+          alarmId: entry.id,
+          error: err.message,
+          stack: err.stack,
+        });
+        eventBus.emit('alarm.failed', {
+          alarmId: entry.id,
+          error: err.message,
+        });
+      }
+
+      if (this.#queue.length === 0) {
+        eventBus.emit('queue.empty', {});
+      }
+    }
+
+    this.#processing = false;
   }
 }
 
