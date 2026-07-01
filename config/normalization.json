@@ -4,13 +4,13 @@
 
   "Y": "Menschenleben in Gefahr",
 
-  "B1":    "Kleinbrand",
-  "B2":    "Mittelbrand",
-  "B2Y":   "Mittelbrand, Menschengefährdung",
-  "B3":    "Großbrand",
-  "B3Y":   "Großbrand, Menschengefährdung",
-  "B4":    "Großbrand",
-  "B4Y":   "Großbrand, Menschengefährdung",
+  "B1":    "Brand eins",
+  "B2":    "Brand zwei",
+  "B2Y":   "Brand zwei mit Menschengefährdung",
+  "B3":    "Brand drei",
+  "B3Y":   "Brand drei mit Menschengefährdung",
+  "B4":    "Brand vier",
+  "B4Y":   "Brand vier mit Menschengefährdung",
 
   "H0":    "Hilfeleistung Lageerkundung",
   "H1":    "Hilfeleistung klein",
