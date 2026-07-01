@@ -47,10 +47,7 @@ async function start() {
     const queueService = QueueService.getInstance();
     const alarmService = AlarmService.getInstance();
 
-    // Gegenseitige Abhängigkeit über Dependency Injection auflösen
-    alarmService.setQueueService(queueService);
-
-    // Queue-Worker starten
+    // Queue-Worker starten (AlarmService wird als Worker übergeben)
     queueService.startWorker(alarmService);
 
     // Server starten
