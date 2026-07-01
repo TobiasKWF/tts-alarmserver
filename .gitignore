@@ -1,0 +1,30 @@
+# Abhängigkeiten
+node_modules/
+
+# Umgebungsvariablen
+.env
+
+# Laufzeit-Daten
+logs/
+tmp/
+*.log
+
+# Test-Ergebnisse
+coverage/
+.nyc_output/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Prozess-IDs
+*.pid
+
+# Build-Artefakte
+dist/
+build/
