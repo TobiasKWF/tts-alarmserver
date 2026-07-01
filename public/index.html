@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>TTS-Alarmserver – Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -42,148 +45,68 @@
     }
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased}
-    body{
-      font-family:var(--font-body);font-size:var(--text-base);
-      background:var(--bg);color:var(--text);min-height:100dvh;
-      transition:background var(--transition),color var(--transition);
-    }
+    body{font-family:var(--font-body);font-size:var(--text-base);background:var(--bg);color:var(--text);min-height:100dvh;transition:background var(--transition),color var(--transition)}
     button{cursor:pointer;border:none;background:none;font:inherit;color:inherit}
     a{color:var(--primary);text-decoration:none}
     a:hover{text-decoration:underline}
     :focus-visible{outline:2px solid var(--primary);outline-offset:3px;border-radius:var(--radius-sm)}
     @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
-    .header{
-      position:sticky;top:0;z-index:100;
-      display:flex;align-items:center;justify-content:space-between;
-      padding:var(--space-4) var(--space-6);
-      background:var(--surface);border-bottom:1px solid var(--border);box-shadow:var(--shadow);
-    }
+    .header{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:var(--space-4) var(--space-6);background:var(--surface);border-bottom:1px solid var(--border);box-shadow:var(--shadow)}
     .header-brand{display:flex;align-items:center;gap:var(--space-3)}
     .header-logo{width:36px;height:36px}
     .header-title{font-size:var(--text-lg);font-weight:700;letter-spacing:-.02em}
     .header-title span{color:var(--primary)}
     .header-actions{display:flex;align-items:center;gap:var(--space-3)}
-    .poll-indicator{
-      display:flex;align-items:center;gap:var(--space-2);
-      font-size:var(--text-xs);color:var(--text-muted);
-      padding:var(--space-1) var(--space-3);
-      border-radius:var(--radius-full);
-      background:var(--surface-offset);border:1px solid var(--border);
-    }
+    .poll-indicator{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-xs);color:var(--text-muted);padding:var(--space-1) var(--space-3);border-radius:var(--radius-full);background:var(--surface-offset);border:1px solid var(--border)}
     .poll-dot{width:8px;height:8px;border-radius:50%;background:var(--error);transition:background var(--transition)}
     .poll-dot.online{background:var(--success);animation:pulse 2s ease-in-out infinite}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-    .btn-icon{
-      width:36px;height:36px;display:flex;align-items:center;justify-content:center;
-      border-radius:var(--radius-md);background:var(--surface-offset);
-      border:1px solid var(--border);color:var(--text-muted);
-      transition:background var(--transition),color var(--transition);
-    }
+    .btn-icon{width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);background:var(--surface-offset);border:1px solid var(--border);color:var(--text-muted);transition:background var(--transition),color var(--transition)}
     .btn-icon:hover{background:var(--primary-dim);color:var(--primary)}
-    .main{
-      max-width:1400px;margin:0 auto;padding:var(--space-6);
-      display:grid;gap:var(--space-6);grid-template-columns:1fr;
-    }
+    .main{max-width:1400px;margin:0 auto;padding:var(--space-6);display:grid;gap:var(--space-6);grid-template-columns:1fr}
     @media(min-width:768px){.main{grid-template-columns:repeat(2,1fr)}}
-    @media(min-width:1200px){
-      .main{grid-template-columns:repeat(3,1fr)}
-      .card-full{grid-column:1/-1}
-      .card-two{grid-column:span 2}
-    }
-    .card{
-      background:var(--surface);border:1px solid var(--border);
-      border-radius:var(--radius-lg);padding:var(--space-5);
-      box-shadow:var(--shadow);display:flex;flex-direction:column;gap:var(--space-4);
-    }
+    @media(min-width:1200px){.main{grid-template-columns:repeat(3,1fr)}.card-full{grid-column:1/-1}.card-two{grid-column:span 2}}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-5);box-shadow:var(--shadow);display:flex;flex-direction:column;gap:var(--space-4)}
     .card-header{display:flex;align-items:center;justify-content:space-between}
-    .card-title{
-      font-size:var(--text-sm);font-weight:600;
-      text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);
-      display:flex;align-items:center;gap:var(--space-2);
-    }
-    .badge{
-      display:inline-flex;align-items:center;
-      padding:2px var(--space-2);border-radius:var(--radius-full);
-      font-size:var(--text-xs);font-weight:600;font-variant-numeric:tabular-nums;
-    }
+    .card-title{font-size:var(--text-sm);font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);display:flex;align-items:center;gap:var(--space-2)}
+    .badge{display:inline-flex;align-items:center;padding:2px var(--space-2);border-radius:var(--radius-full);font-size:var(--text-xs);font-weight:600;font-variant-numeric:tabular-nums}
     .badge-primary{background:var(--primary-dim);color:var(--primary)}
     .badge-success{background:var(--success-dim);color:var(--success)}
     .badge-warning{background:var(--warning-dim);color:var(--warning)}
     .badge-error{background:var(--error-dim);color:var(--error)}
     .badge-muted{background:var(--surface-offset);color:var(--text-muted)}
     .kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(200px,100%),1fr));gap:var(--space-4)}
-    .kpi{
-      background:var(--surface-2);border:1px solid var(--border);
-      border-radius:var(--radius-md);padding:var(--space-4);
-      display:flex;flex-direction:column;gap:var(--space-1);
-    }
+    .kpi{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-1)}
     .kpi-label{font-size:var(--text-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
     .kpi-value{font-size:var(--text-xl);font-weight:700;font-variant-numeric:tabular-nums;line-height:1;transition:color var(--transition)}
     .kpi-sub{font-size:var(--text-xs);color:var(--text-muted)}
-    .current-announcement{
-      background:var(--surface-2);border:1px solid var(--border);
-      border-radius:var(--radius-md);padding:var(--space-4);
-      min-height:80px;display:flex;flex-direction:column;gap:var(--space-2);
-    }
+    .current-announcement{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-4);min-height:80px;display:flex;flex-direction:column;gap:var(--space-2)}
     .current-text{font-size:var(--text-base);color:var(--text);line-height:1.6;word-break:break-word}
     .current-text.idle{color:var(--text-faint);font-style:italic}
-    .queue-list,.history-list,.error-list{
-      display:flex;flex-direction:column;gap:var(--space-2);overflow-y:auto;
-    }
-    .queue-list{max-height:280px}
-    .history-list{max-height:400px}
-    .error-list{max-height:200px}
+    .queue-list,.history-list,.error-list{display:flex;flex-direction:column;gap:var(--space-2);overflow-y:auto}
+    .queue-list{max-height:280px}.history-list{max-height:400px}.error-list{max-height:200px}
     .queue-item,.history-item,.error-item{border-radius:var(--radius-md)}
-    .queue-item{
-      display:flex;align-items:center;gap:var(--space-3);
-      padding:var(--space-2) var(--space-3);
-      background:var(--surface-2);border:1px solid var(--border);
-      font-size:var(--text-sm);
-    }
+    .queue-item{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-3);background:var(--surface-2);border:1px solid var(--border);font-size:var(--text-sm)}
     .queue-priority{font-size:var(--text-xs);font-weight:700;width:20px;text-align:center;color:var(--primary);flex-shrink:0}
     .queue-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}
-    .queue-empty,.history-empty,.error-empty{
-      text-align:center;color:var(--text-faint);font-style:italic;
-      font-size:var(--text-sm);padding:var(--space-6) 0;
-    }
-    .history-item{
-      display:grid;grid-template-columns:auto 1fr auto;
-      gap:var(--space-3);align-items:start;
-      padding:var(--space-3);
-      background:var(--surface-2);border:1px solid var(--border);
-      font-size:var(--text-sm);
-    }
+    .queue-empty,.history-empty,.error-empty{text-align:center;color:var(--text-faint);font-style:italic;font-size:var(--text-sm);padding:var(--space-6) 0}
+    .history-item{display:grid;grid-template-columns:auto 1fr auto;gap:var(--space-3);align-items:start;padding:var(--space-3);background:var(--surface-2);border:1px solid var(--border);font-size:var(--text-sm)}
     .history-status{width:8px;height:8px;border-radius:50%;margin-top:6px;flex-shrink:0}
-    .history-status.ok{background:var(--success)}
-    .history-status.error{background:var(--error)}
+    .history-status.ok{background:var(--success)}.history-status.error{background:var(--error)}
     .history-body{overflow:hidden}
     .history-text{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .history-meta{font-size:var(--text-xs);color:var(--text-muted);margin-top:var(--space-1);display:flex;gap:var(--space-3);flex-wrap:wrap}
     .history-time{font-size:var(--text-xs);color:var(--text-faint);white-space:nowrap}
-    .error-item{
-      padding:var(--space-2) var(--space-3);
-      background:var(--error-dim);border:1px solid var(--error);
-      font-size:var(--text-xs);color:var(--error);
-    }
-    .error-time{color:var(--text-muted);margin-right:var(--space-2)}
-    .status-row{
-      display:flex;align-items:center;justify-content:space-between;
-      padding:var(--space-2) 0;border-bottom:1px solid var(--border);
-      font-size:var(--text-sm);
-    }
+    .error-item{padding:var(--space-2) var(--space-3);background:var(--error-dim);border:1px solid var(--error);font-size:var(--text-xs);color:var(--error)}
+    .status-row{display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) 0;border-bottom:1px solid var(--border);font-size:var(--text-sm)}
     .status-row:last-child{border-bottom:none}
-    .status-label{color:var(--text-muted)}
-    .status-value{font-weight:500;font-variant-numeric:tabular-nums}
+    .status-label{color:var(--text-muted)}.status-value{font-weight:500;font-variant-numeric:tabular-nums}
     ::-webkit-scrollbar{width:6px;height:6px}
     ::-webkit-scrollbar-track{background:transparent}
     ::-webkit-scrollbar-thumb{background:var(--border);border-radius:var(--radius-full)}
     ::-webkit-scrollbar-thumb:hover{background:var(--text-faint)}
-    .footer{
-      text-align:center;padding:var(--space-6);
-      font-size:var(--text-xs);color:var(--text-faint);
-      border-top:1px solid var(--border);
-    }
+    .footer{text-align:center;padding:var(--space-6);font-size:var(--text-xs);color:var(--text-faint);border-top:1px solid var(--border)}
   </style>
 </head>
 <body>
@@ -306,29 +229,21 @@
 (function(){
 'use strict';
 
-// -----------------------------------------------------------------------
-// State
-// -----------------------------------------------------------------------
 const state = {
-  online:       false,
   totalAlarms:  0,
   failedAlarms: 0,
   history:      [],
   serverUptimeBase: null,
 };
 
-// -----------------------------------------------------------------------
 // Theme
-// -----------------------------------------------------------------------
 const html  = document.documentElement;
 let   theme = html.dataset.theme || 'dark';
-
 document.getElementById('themeToggle').addEventListener('click', () => {
   theme = theme === 'dark' ? 'light' : 'dark';
   html.dataset.theme = theme;
   updateThemeIcon();
 });
-
 function updateThemeIcon() {
   document.getElementById('themeToggle').innerHTML = theme === 'dark'
     ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>`
@@ -336,106 +251,89 @@ function updateThemeIcon() {
 }
 
 // -----------------------------------------------------------------------
-// HTTP Polling – alle 5 Sekunden /stats
+// Polling
 // -----------------------------------------------------------------------
 async function poll() {
+  let data;
   try {
-    const res  = await fetch('/stats');
+    const res = await fetch('/stats', { cache: 'no-store' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-
-    state.online = true;
-    setStatus(true);
-
-    // Server
-    if (data.server) {
-      const s = data.server;
-      el('srvVersion').textContent = s.version  || '--';
-      el('srvEnv').textContent     = s.nodeEnv  || '--';
-      el('srvPid').textContent     = s.pid      || '--';
-      el('kpiUptime').textContent  = s.uptimeHuman || formatUptime(s.uptime || 0);
-      el('kpiMemory').textContent  = s.memory ? s.memory.heapUsedMB + ' MB' : '--';
-      if (s.uptime != null) state.serverUptimeBase = Date.now() - s.uptime * 1000;
-    }
-
-    // Queue
-    if (data.queue) {
-      const q = data.queue;
-      const size = q.size ?? 0;
-      el('kpiQueue').textContent    = size;
-      el('queueBadge').textContent  = size;
-      el('srvQueueMax').textContent = q.maxSize ?? '--';
-      renderQueue(q.items || []);
-      if (q.failedTotal != null) state.failedAlarms = q.failedTotal;
-    }
-
-    // Alarm
-    if (data.alarm) {
-      const a = data.alarm;
-      if (a.totalAlarms  != null) state.totalAlarms  = a.totalAlarms;
-      if (a.failedAlarms != null) state.failedAlarms = a.failedAlarms;
-
-      // Aktuelle Durchsage
-      if (a.current) {
-        el('currentText').textContent = a.current.text || '(Audiodatei)';
-        el('currentText').classList.remove('idle');
-        el('currentBadge').textContent = 'Aktiv';
-        el('currentBadge').className   = 'badge badge-success';
-      } else {
-        el('currentText').textContent = 'Keine aktive Durchsage.';
-        el('currentText').classList.add('idle');
-        el('currentBadge').textContent = 'Idle';
-        el('currentBadge').className   = 'badge badge-muted';
-      }
-    }
-
-    // RTP
-    if (data.rtp) {
-      el('srvRtp').textContent = data.rtp.host + ':' + data.rtp.port;
-    }
-
-    // History
-    if (Array.isArray(data.history)) {
-      state.history = data.history;
-      renderHistory(state.history);
-    }
-
-    // KPIs
-    el('kpiTotal').textContent  = state.totalAlarms;
-    el('kpiErrors').textContent = state.failedAlarms;
-    el('lastUpdate').textContent = new Date().toLocaleTimeString('de-DE');
-
+    data = await res.json();
   } catch (err) {
-    state.online = false;
     setStatus(false);
+    return;
   }
+
+  // Ab hier: fetch erfolgreich → immer Online setzen
+  setStatus(true);
+
+  // Server
+  const s = data.server || {};
+  el('srvVersion').textContent = s.version  || '--';
+  el('srvEnv').textContent     = s.nodeEnv  || '--';
+  el('srvPid').textContent     = s.pid      || '--';
+  el('kpiUptime').textContent  = s.uptimeHuman || formatUptime(s.uptime || 0);
+  el('kpiMemory').textContent  = s.memory ? (s.memory.heapUsedMB + ' MB') : '--';
+  if (s.uptime != null) state.serverUptimeBase = Date.now() - s.uptime * 1000;
+
+  // Queue
+  const q = data.queue || {};
+  const qSize = q.size ?? 0;
+  el('kpiQueue').textContent    = qSize;
+  el('queueBadge').textContent  = qSize;
+  el('srvQueueMax').textContent = q.maxSize ?? '--';
+  renderQueue(Array.isArray(q.items) ? q.items : []);
+  if (q.failedTotal != null) state.failedAlarms = q.failedTotal;
+
+  // Alarm
+  const a = data.alarm || {};
+  if (a.totalAlarms  != null) state.totalAlarms  = a.totalAlarms;
+  if (a.failedAlarms != null) state.failedAlarms = a.failedAlarms;
+  if (a.current) {
+    el('currentText').textContent = a.current.text || '(Audiodatei)';
+    el('currentText').classList.remove('idle');
+    el('currentBadge').textContent = 'Aktiv';
+    el('currentBadge').className   = 'badge badge-success';
+  } else {
+    el('currentText').textContent = 'Keine aktive Durchsage.';
+    el('currentText').classList.add('idle');
+    el('currentBadge').textContent = 'Idle';
+    el('currentBadge').className   = 'badge badge-muted';
+  }
+
+  // RTP
+  const r = data.rtp || {};
+  if (r.host) el('srvRtp').textContent = r.host + ':' + (r.port || '');
+
+  // History
+  if (Array.isArray(data.history)) {
+    state.history = data.history;
+    renderHistory(state.history);
+  }
+
+  // KPIs
+  el('kpiTotal').textContent   = state.totalAlarms;
+  el('kpiErrors').textContent  = state.failedAlarms;
+  el('lastUpdate').textContent = new Date().toLocaleTimeString('de-DE');
 }
 
 function setStatus(online) {
-  el('pollDot').className   = 'poll-dot' + (online ? ' online' : '');
+  el('pollDot').className    = 'poll-dot' + (online ? ' online' : '');
   el('pollLabel').textContent = online ? 'Online' : 'Offline';
   el('kpiStatus').textContent = online ? 'Online' : 'Offline';
   el('kpiStatus').style.color = online ? 'var(--success)' : 'var(--error)';
 }
 
-// -----------------------------------------------------------------------
 // Lokaler Uptime-Ticker
-// -----------------------------------------------------------------------
 setInterval(() => {
   if (state.serverUptimeBase == null) return;
   const elapsed = Math.floor((Date.now() - state.serverUptimeBase) / 1000);
   el('kpiUptime').textContent = formatUptime(elapsed);
 }, 1000);
 
-// -----------------------------------------------------------------------
-// Queue-Rendering
-// -----------------------------------------------------------------------
 function renderQueue(items) {
   const list = el('queueList');
-  if (!items || items.length === 0) {
-    list.innerHTML = '<div class="queue-empty">Warteschlange ist leer.</div>';
-    return;
-  }
+  if (!items.length) { list.innerHTML = '<div class="queue-empty">Warteschlange ist leer.</div>'; return; }
   list.innerHTML = items.map(item => `
     <div class="queue-item">
       <div class="queue-priority">${item.priority || 5}</div>
@@ -445,16 +343,10 @@ function renderQueue(items) {
   `).join('');
 }
 
-// -----------------------------------------------------------------------
-// History-Rendering
-// -----------------------------------------------------------------------
 function renderHistory(items) {
   const list = el('historyList');
   el('historyBadge').textContent = items.length;
-  if (!items || items.length === 0) {
-    list.innerHTML = '<div class="history-empty">Noch keine Alarmierungen.</div>';
-    return;
-  }
+  if (!items.length) { list.innerHTML = '<div class="history-empty">Noch keine Alarmierungen.</div>'; return; }
   list.innerHTML = items.slice(0, 50).map(item => `
     <div class="history-item">
       <div class="history-status ${item.status === 'failed' || item.error ? 'error' : 'ok'}"></div>
@@ -472,23 +364,14 @@ function renderHistory(items) {
   `).join('');
 }
 
-// -----------------------------------------------------------------------
-// Hilfsfunktionen
-// -----------------------------------------------------------------------
 function el(id) { return document.getElementById(id); }
-
 function esc(str) {
-  return String(str)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-
 function formatTime(iso) {
-  try {
-    return new Date(iso).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  } catch(_){ return iso; }
+  try { return new Date(iso).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+  catch(_){ return iso; }
 }
-
 function formatUptime(seconds) {
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
@@ -499,12 +382,9 @@ function formatUptime(seconds) {
   return `${m}m ${s}s`;
 }
 
-// -----------------------------------------------------------------------
-// Init
-// -----------------------------------------------------------------------
 updateThemeIcon();
-poll();                          // sofort beim Laden
-setInterval(poll, 5000);         // dann alle 5 Sekunden
+poll();
+setInterval(poll, 5000);
 
 }());
 </script>
