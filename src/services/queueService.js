@@ -9,12 +9,19 @@
  * Eintrag heraus und delegiert die Verarbeitung an den AlarmService.
  *
  * Prioritäten: 1 (höchste) bis 10 (niedrigste). Gleiche Priorität → FIFO.
+ *
+ * Events (via EventBus):
+ *   alarm.received  { alarmId, text, priority, position, queueSize }
+ *   queue.changed   { size, items }
+ *   queue.empty     {}
+ *   alarm.failed    { alarmId, error, code }  (nur bei Fehler im Worker)
  */
 
 const { v4: uuidv4 } = require('uuid');
-const config = require('../config');
-const logger = require('../utils/logger').child({ service: 'QueueService' });
-const eventBus = require('../events/eventBus');
+const config         = require('../config');
+const logger         = require('../utils/logger').child({ service: 'QueueService' });
+const eventBus       = require('../events/eventBus');
+const { QueueFullError } = require('../errors');
 
 /** @type {QueueService|null} */
 let instance = null;
@@ -33,10 +40,10 @@ class QueueService {
     /** @type {AlarmService|null} */
     this._alarmService = null;
 
-    /** @type {number} */
+    /** @type {number} Gesamt verarbeitete Alarme */
     this._processedTotal = 0;
 
-    /** @type {number} */
+    /** @type {number} Gesamt fehlgeschlagene Alarme */
     this._failedTotal = 0;
   }
 
@@ -53,23 +60,26 @@ class QueueService {
    * Fügt eine Alarmierung in die Queue ein.
    *
    * @param {object} payload        - Alarm-Daten (text, voice, rtp, …)
-   * @param {number} [priority=5]   - Priorität 1–10 (1 = höchste)
+   * @param {number} [priority]     - Priorität 1–10 (1 = höchste); Standard aus config
    * @returns {{ id: string, position: number }} Alarm-ID und Position in der Queue
-   * @throws {Error} Wenn die Queue voll ist
+   * @throws {QueueFullError} Wenn die Queue voll ist
    */
   enqueue(payload, priority = config.queue.defaultPriority) {
     if (this._queue.length >= config.queue.maxSize) {
-      throw Object.assign(new Error('Queue ist voll'), { code: 'QUEUE_FULL', statusCode: 429 });
+      throw new QueueFullError(config.queue.maxSize);
     }
 
     const entry = {
-      id: payload.id || uuidv4(),
-      payload,
-      priority: Math.min(10, Math.max(1, priority)),
-      enqueuedAt: Date.now(),
+      id:          payload.id || uuidv4(),
+      payload:     { ...payload },
+      priority:    Math.min(10, Math.max(1, priority)),
+      enqueuedAt:  Date.now(),
     };
 
-    // Sortiert einfügen: niedrigerer Priority-Wert → weiter vorne
+    // payload.id sicherstellen (für AlarmService)
+    entry.payload.id = entry.id;
+
+    // Sortiert einfügen: niedrigerer Priority-Wert → weiter vorne; gleiche Prio → FIFO
     const insertIdx = this._queue.findIndex((e) => e.priority > entry.priority);
     if (insertIdx === -1) {
       this._queue.push(entry);
@@ -80,14 +90,22 @@ class QueueService {
     const position = this._queue.findIndex((e) => e.id === entry.id) + 1;
 
     logger.info('Alarm in Queue eingereiht', {
-      alarmId: entry.id,
-      priority: entry.priority,
+      alarmId:   entry.id,
+      priority:  entry.priority,
+      position,
+      queueSize: this._queue.length,
+    });
+
+    eventBus.emit('alarm.received', {
+      alarmId:   entry.id,
+      text:      entry.payload.text || '',
+      priority:  entry.priority,
       position,
       queueSize: this._queue.length,
     });
 
     eventBus.emit('queue.changed', {
-      size: this._queue.length,
+      size:  this._queue.length,
       items: this._getPublicQueue(),
     });
 
@@ -96,7 +114,7 @@ class QueueService {
 
   /**
    * Startet den Worker-Loop.
-   * @param {AlarmService} alarmService
+   * @param {import('./alarmService').AlarmService} alarmService
    */
   startWorker(alarmService) {
     this._alarmService = alarmService;
@@ -107,28 +125,31 @@ class QueueService {
   }
 
   /**
-   * Stoppt den Worker-Loop sauber.
+   * Stoppt den Worker-Loop sauber (wartet nicht auf laufenden Alarm).
    */
-  async stop() {
+  stop() {
     this._running = false;
-    logger.info('Queue-Worker wird gestoppt', { remaining: this._queue.length });
+    logger.info('Queue-Worker gestoppt', { remaining: this._queue.length });
   }
 
   /** Pausiert die Verarbeitung (laufende Alarmierung wird abgeschlossen). */
   pause() {
     this._paused = true;
     logger.info('Queue pausiert');
+    eventBus.emit('queue.changed', { size: this._queue.length, items: this._getPublicQueue(), paused: true });
   }
 
   /** Setzt die Verarbeitung fort. */
   resume() {
     this._paused = false;
     logger.info('Queue fortgesetzt');
-    this._loop();
+    eventBus.emit('queue.changed', { size: this._queue.length, items: this._getPublicQueue(), paused: false });
+    // Loop könnte eingeschlafen sein – neu starten
+    if (this._running) this._loop();
   }
 
   /**
-   * Gibt aktuelle Warteschlange (öffentlich, ohne interne Felder) zurück.
+   * Gibt die aktuelle Warteschlange (bereinigt) zurück.
    * @returns {Array<object>}
    */
   getQueue() {
@@ -141,11 +162,13 @@ class QueueService {
    */
   getStats() {
     return {
-      size: this._queue.length,
-      processedTotal: this._processedTotal,
-      failedTotal: this._failedTotal,
-      running: this._running,
-      paused: this._paused,
+      size:            this._queue.length,
+      maxSize:         config.queue.maxSize,
+      processedTotal:  this._processedTotal,
+      failedTotal:     this._failedTotal,
+      running:         this._running,
+      paused:          this._paused,
+      items:           this._getPublicQueue(),
     };
   }
 
@@ -155,18 +178,20 @@ class QueueService {
 
   /**
    * Haupt-Loop: zieht Einträge aus der Queue und verarbeitet sie sequenziell.
+   * Beendet sich selbst wenn _running = false oder _paused = true.
    */
   async _loop() {
-    while (this._running) {
-      if (this._paused || this._queue.length === 0) {
+    while (this._running && !this._paused) {
+      if (this._queue.length === 0) {
         await _sleep(200);
         continue;
       }
 
-      const entry = this._queue.shift();
+      const entry  = this._queue.shift();
+      const waitMs = Date.now() - entry.enqueuedAt;
 
       eventBus.emit('queue.changed', {
-        size: this._queue.length,
+        size:  this._queue.length,
         items: this._getPublicQueue(),
       });
 
@@ -174,9 +199,8 @@ class QueueService {
         eventBus.emit('queue.empty', {});
       }
 
-      const waitMs = Date.now() - entry.enqueuedAt;
       logger.info('Alarm wird verarbeitet', {
-        alarmId: entry.id,
+        alarmId:  entry.id,
         priority: entry.priority,
         waitMs,
       });
@@ -188,27 +212,27 @@ class QueueService {
         this._failedTotal++;
         logger.error('Fehler bei der Alarm-Verarbeitung', {
           alarmId: entry.id,
-          error: err.message,
-          stack: err.stack,
+          error:   err.message,
+          code:    err.code,
+          stack:   err.stack,
         });
-        eventBus.emit('alarm.failed', {
-          alarmId: entry.id,
-          error: err.message,
-        });
+        // alarm.failed wird bereits von AlarmService emittiert.
+        // Hier KEIN zweites Emit – verhindert Dopplung im Dashboard.
       }
     }
   }
 
   /**
-   * Gibt eine bereinigte Queue zurück (kein internes State).
+   * Gibt eine bereinigte Queue zurück (keine internen Felder).
    * @returns {Array<object>}
    */
   _getPublicQueue() {
     return this._queue.map((e) => ({
-      id: e.id,
-      priority: e.priority,
-      text: e.payload.text || e.payload.message || '',
-      enqueuedAt: new Date(e.enqueuedAt).toISOString(),
+      id:          e.id,
+      priority:    e.priority,
+      text:        e.payload.text || e.payload.message || '',
+      source:      e.payload.source || 'api',
+      enqueuedAt:  new Date(e.enqueuedAt).toISOString(),
     }));
   }
 }
@@ -221,13 +245,7 @@ class QueueService {
  * @property {number} enqueuedAt
  */
 
-/**
- * Hilfsfunktion: nicht-blockierendes Sleep.
- * @param {number} ms
- * @returns {Promise<void>}
- */
-function _sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+/** @param {number} ms */
+const _sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 module.exports = { QueueService };

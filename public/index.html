@@ -4,438 +4,247 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TTS-Alarmserver – Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    /* =====================================================================
+    /* ===================================================================
        DESIGN TOKENS
-    ===================================================================== */
+    =================================================================== */
     :root {
       --font-body: 'Inter', system-ui, sans-serif;
-      --text-xs:   clamp(0.75rem, 0.7rem + 0.25vw, 0.875rem);
-      --text-sm:   clamp(0.875rem, 0.8rem + 0.35vw, 1rem);
-      --text-base: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);
-      --text-lg:   clamp(1.125rem, 1rem + 0.75vw, 1.5rem);
-      --text-xl:   clamp(1.5rem, 1.2rem + 1.25vw, 2.25rem);
-      --space-1: 0.25rem; --space-2: 0.5rem;  --space-3: 0.75rem;
-      --space-4: 1rem;    --space-5: 1.25rem; --space-6: 1.5rem;
-      --space-8: 2rem;    --space-10: 2.5rem; --space-12: 3rem;
-      --radius-sm: 0.375rem; --radius-md: 0.5rem;
-      --radius-lg: 0.75rem;  --radius-full: 9999px;
-      --transition: 180ms cubic-bezier(0.16, 1, 0.3, 1);
+      --text-xs:   clamp(0.75rem,  0.7rem  + 0.25vw, 0.875rem);
+      --text-sm:   clamp(0.875rem, 0.8rem  + 0.35vw, 1rem);
+      --text-base: clamp(1rem,     0.95rem + 0.25vw, 1.125rem);
+      --text-lg:   clamp(1.125rem, 1rem    + 0.75vw, 1.5rem);
+      --text-xl:   clamp(1.5rem,   1.2rem  + 1.25vw, 2.25rem);
+      --space-1:0.25rem; --space-2:0.5rem;  --space-3:0.75rem;
+      --space-4:1rem;    --space-5:1.25rem; --space-6:1.5rem;
+      --space-8:2rem;    --space-10:2.5rem; --space-12:3rem;
+      --radius-sm:0.375rem; --radius-md:0.5rem;
+      --radius-lg:0.75rem;  --radius-full:9999px;
+      --transition:180ms cubic-bezier(0.16,1,0.3,1);
     }
-
-    /* Dark Mode (Default) */
-    [data-theme="dark"] {
-      --bg:             #0f1117;
-      --surface:        #161b22;
-      --surface-2:      #1c2128;
-      --surface-offset: #21262d;
-      --border:         #30363d;
-      --text:           #e6edf3;
-      --text-muted:     #8b949e;
-      --text-faint:     #484f58;
-      --primary:        #58a6ff;
-      --primary-dim:    #1f4068;
-      --success:        #3fb950;
-      --success-dim:    #1a3a22;
-      --warning:        #d29922;
-      --warning-dim:    #3a2a00;
-      --error:          #f85149;
-      --error-dim:      #3d1a1a;
-      --shadow:         0 4px 16px rgba(0,0,0,0.4);
+    :root,[data-theme="dark"] {
+      --bg:#0f1117; --surface:#161b22; --surface-2:#1c2128; --surface-offset:#21262d;
+      --border:#30363d; --text:#e6edf3; --text-muted:#8b949e; --text-faint:#484f58;
+      --primary:#58a6ff; --primary-dim:#1f4068;
+      --success:#3fb950; --success-dim:#1a3a22;
+      --warning:#d29922; --warning-dim:#3a2a00;
+      --error:#f85149;   --error-dim:#3d1a1a;
+      --shadow:0 4px 16px rgba(0,0,0,.4);
     }
-
-    /* Light Mode */
     [data-theme="light"] {
-      --bg:             #f6f8fa;
-      --surface:        #ffffff;
-      --surface-2:      #f6f8fa;
-      --surface-offset: #eaeef2;
-      --border:         #d0d7de;
-      --text:           #1f2328;
-      --text-muted:     #636c76;
-      --text-faint:     #b0b8c1;
-      --primary:        #0969da;
-      --primary-dim:    #ddf4ff;
-      --success:        #1a7f37;
-      --success-dim:    #dafbe1;
-      --warning:        #9a6700;
-      --warning-dim:    #fff8c5;
-      --error:          #cf222e;
-      --error-dim:      #ffebe9;
-      --shadow:         0 4px 16px rgba(0,0,0,0.08);
+      --bg:#f6f8fa; --surface:#fff; --surface-2:#f6f8fa; --surface-offset:#eaeef2;
+      --border:#d0d7de; --text:#1f2328; --text-muted:#636c76; --text-faint:#b0b8c1;
+      --primary:#0969da; --primary-dim:#ddf4ff;
+      --success:#1a7f37; --success-dim:#dafbe1;
+      --warning:#9a6700; --warning-dim:#fff8c5;
+      --error:#cf222e;   --error-dim:#ffebe9;
+      --shadow:0 4px 16px rgba(0,0,0,.08);
     }
 
-    /* =====================================================================
+    /* ===================================================================
        BASE
-    ===================================================================== */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
-    body {
-      font-family: var(--font-body);
-      font-size: var(--text-base);
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100dvh;
-      transition: background var(--transition), color var(--transition);
+    =================================================================== */
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased}
+    body{
+      font-family:var(--font-body);font-size:var(--text-base);
+      background:var(--bg);color:var(--text);min-height:100dvh;
+      transition:background var(--transition),color var(--transition);
     }
-    button { cursor: pointer; border: none; background: none; font: inherit; color: inherit; }
-    a { color: var(--primary); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    :focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: var(--radius-sm); }
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
-    }
+    button{cursor:pointer;border:none;background:none;font:inherit;color:inherit}
+    a{color:var(--primary);text-decoration:none}
+    a:hover{text-decoration:underline}
+    :focus-visible{outline:2px solid var(--primary);outline-offset:3px;border-radius:var(--radius-sm)}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
-    /* =====================================================================
+    /* ===================================================================
        LAYOUT
-    ===================================================================== */
-    .header {
-      position: sticky; top: 0; z-index: 100;
-      display: flex; align-items: center; justify-content: space-between;
-      padding: var(--space-4) var(--space-6);
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      box-shadow: var(--shadow);
+    =================================================================== */
+    .header{
+      position:sticky;top:0;z-index:100;
+      display:flex;align-items:center;justify-content:space-between;
+      padding:var(--space-4) var(--space-6);
+      background:var(--surface);border-bottom:1px solid var(--border);box-shadow:var(--shadow);
     }
-    .header-brand {
-      display: flex; align-items: center; gap: var(--space-3);
+    .header-brand{display:flex;align-items:center;gap:var(--space-3)}
+    .header-logo{width:36px;height:36px}
+    .header-title{font-size:var(--text-lg);font-weight:700;letter-spacing:-.02em}
+    .header-title span{color:var(--primary)}
+    .header-actions{display:flex;align-items:center;gap:var(--space-3)}
+    .ws-indicator{
+      display:flex;align-items:center;gap:var(--space-2);
+      font-size:var(--text-xs);color:var(--text-muted);
+      padding:var(--space-1) var(--space-3);
+      border-radius:var(--radius-full);
+      background:var(--surface-offset);border:1px solid var(--border);
     }
-    .header-logo {
-      width: 36px; height: 36px;
+    .ws-dot{width:8px;height:8px;border-radius:50%;background:var(--error);transition:background var(--transition)}
+    .ws-dot.connected{background:var(--success);animation:pulse 2s ease-in-out infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    .btn-icon{
+      width:36px;height:36px;display:flex;align-items:center;justify-content:center;
+      border-radius:var(--radius-md);background:var(--surface-offset);
+      border:1px solid var(--border);color:var(--text-muted);
+      transition:background var(--transition),color var(--transition);
     }
-    .header-title {
-      font-size: var(--text-lg);
-      font-weight: 700;
-      letter-spacing: -0.02em;
-    }
-    .header-title span { color: var(--primary); }
-    .header-actions {
-      display: flex; align-items: center; gap: var(--space-3);
-    }
-    .ws-indicator {
-      display: flex; align-items: center; gap: var(--space-2);
-      font-size: var(--text-xs);
-      color: var(--text-muted);
-      padding: var(--space-1) var(--space-3);
-      border-radius: var(--radius-full);
-      background: var(--surface-offset);
-      border: 1px solid var(--border);
-    }
-    .ws-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--error);
-      transition: background var(--transition);
-    }
-    .ws-dot.connected { background: var(--success); animation: pulse 2s ease-in-out infinite; }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
-    }
-    .btn-icon {
-      width: 36px; height: 36px;
-      display: flex; align-items: center; justify-content: center;
-      border-radius: var(--radius-md);
-      background: var(--surface-offset);
-      border: 1px solid var(--border);
-      color: var(--text-muted);
-      transition: background var(--transition), color var(--transition);
-    }
-    .btn-icon:hover { background: var(--primary-dim); color: var(--primary); }
+    .btn-icon:hover{background:var(--primary-dim);color:var(--primary)}
 
-    .main {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: var(--space-6);
-      display: grid;
-      gap: var(--space-6);
-      grid-template-columns: 1fr;
+    .main{
+      max-width:1400px;margin:0 auto;padding:var(--space-6);
+      display:grid;gap:var(--space-6);grid-template-columns:1fr;
     }
-    @media (min-width: 768px) {
-      .main { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (min-width: 1200px) {
-      .main { grid-template-columns: repeat(3, 1fr); }
-      .card-full  { grid-column: 1 / -1; }
-      .card-two   { grid-column: span 2; }
+    @media(min-width:768px){.main{grid-template-columns:repeat(2,1fr)}}
+    @media(min-width:1200px){
+      .main{grid-template-columns:repeat(3,1fr)}
+      .card-full{grid-column:1/-1}
+      .card-two{grid-column:span 2}
     }
 
-    /* =====================================================================
+    /* ===================================================================
        CARDS
-    ===================================================================== */
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: var(--space-5);
-      box-shadow: var(--shadow);
-      display: flex; flex-direction: column; gap: var(--space-4);
+    =================================================================== */
+    .card{
+      background:var(--surface);border:1px solid var(--border);
+      border-radius:var(--radius-lg);padding:var(--space-5);
+      box-shadow:var(--shadow);display:flex;flex-direction:column;gap:var(--space-4);
     }
-    .card-header {
-      display: flex; align-items: center; justify-content: space-between;
+    .card-header{display:flex;align-items:center;justify-content:space-between}
+    .card-title{
+      font-size:var(--text-sm);font-weight:600;
+      text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);
+      display:flex;align-items:center;gap:var(--space-2);
     }
-    .card-title {
-      font-size: var(--text-sm);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-muted);
-      display: flex; align-items: center; gap: var(--space-2);
+    .card-title svg{opacity:.7}
+    .badge{
+      display:inline-flex;align-items:center;
+      padding:2px var(--space-2);border-radius:var(--radius-full);
+      font-size:var(--text-xs);font-weight:600;font-variant-numeric:tabular-nums;
     }
-    .card-title svg { opacity: 0.7; }
-    .badge {
-      display: inline-flex; align-items: center;
-      padding: 2px var(--space-2);
-      border-radius: var(--radius-full);
-      font-size: var(--text-xs);
-      font-weight: 600;
-      font-variant-numeric: tabular-nums;
-    }
-    .badge-primary { background: var(--primary-dim); color: var(--primary); }
-    .badge-success { background: var(--success-dim); color: var(--success); }
-    .badge-warning { background: var(--warning-dim); color: var(--warning); }
-    .badge-error   { background: var(--error-dim);   color: var(--error); }
-    .badge-muted   { background: var(--surface-offset); color: var(--text-muted); }
+    .badge-primary{background:var(--primary-dim);color:var(--primary)}
+    .badge-success{background:var(--success-dim);color:var(--success)}
+    .badge-warning{background:var(--warning-dim);color:var(--warning)}
+    .badge-error{background:var(--error-dim);color:var(--error)}
+    .badge-muted{background:var(--surface-offset);color:var(--text-muted)}
 
-    /* =====================================================================
+    /* ===================================================================
        KPI GRID
-    ===================================================================== */
-    .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
-      gap: var(--space-4);
+    =================================================================== */
+    .kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(200px,100%),1fr));gap:var(--space-4)}
+    .kpi{
+      background:var(--surface-2);border:1px solid var(--border);
+      border-radius:var(--radius-md);padding:var(--space-4);
+      display:flex;flex-direction:column;gap:var(--space-1);
     }
-    .kpi {
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      padding: var(--space-4);
-      display: flex; flex-direction: column; gap: var(--space-1);
+    .kpi-label{font-size:var(--text-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
+    .kpi-value{font-size:var(--text-xl);font-weight:700;font-variant-numeric:tabular-nums;line-height:1;transition:color var(--transition)}
+    .kpi-sub{font-size:var(--text-xs);color:var(--text-muted)}
+
+    /* ===================================================================
+       AKTUELLE DURCHSAGE
+    =================================================================== */
+    .current-announcement{
+      background:var(--surface-2);border:1px solid var(--border);
+      border-radius:var(--radius-md);padding:var(--space-4);
+      min-height:80px;display:flex;flex-direction:column;gap:var(--space-2);
     }
-    .kpi-label {
-      font-size: var(--text-xs);
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    .kpi-value {
-      font-size: var(--text-xl);
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
-      line-height: 1;
-      transition: color var(--transition);
-    }
-    .kpi-sub {
-      font-size: var(--text-xs);
-      color: var(--text-muted);
+    .current-text{font-size:var(--text-base);color:var(--text);line-height:1.6;word-break:break-word}
+    .current-text.idle{color:var(--text-faint);font-style:italic}
+    .current-meta{font-size:var(--text-xs);color:var(--text-muted);display:flex;gap:var(--space-3);flex-wrap:wrap}
+    .progress-bar-wrap{height:3px;background:var(--surface-offset);border-radius:var(--radius-full);overflow:hidden}
+    .progress-bar{height:100%;background:var(--primary);border-radius:var(--radius-full);width:0%;transition:width .3s linear}
+    .progress-bar.animate{animation:indeterminate 1.4s ease-in-out infinite}
+    @keyframes indeterminate{
+      0%{transform:translateX(-100%);width:40%}
+      100%{transform:translateX(300%);width:40%}
     }
 
-    /* =====================================================================
-       CURRENT ANNOUNCEMENT
-    ===================================================================== */
-    .current-announcement {
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      padding: var(--space-4);
-      min-height: 80px;
-      display: flex; flex-direction: column; gap: var(--space-2);
+    /* ===================================================================
+       QUEUE + HISTORY
+    =================================================================== */
+    .queue-list,.history-list,.error-list{
+      display:flex;flex-direction:column;gap:var(--space-2);overflow-y:auto;
     }
-    .current-text {
-      font-size: var(--text-base);
-      color: var(--text);
-      line-height: 1.6;
-      word-break: break-word;
-    }
-    .current-text.idle { color: var(--text-faint); font-style: italic; }
-    .current-meta {
-      font-size: var(--text-xs);
-      color: var(--text-muted);
-      display: flex; gap: var(--space-3); flex-wrap: wrap;
-    }
-    .progress-bar-wrap {
-      height: 3px;
-      background: var(--surface-offset);
-      border-radius: var(--radius-full);
-      overflow: hidden;
-    }
-    .progress-bar {
-      height: 100%;
-      background: var(--primary);
-      border-radius: var(--radius-full);
-      width: 0%;
-      transition: width 0.3s linear;
-    }
-    .progress-bar.animate {
-      animation: indeterminate 1.4s ease-in-out infinite;
-    }
-    @keyframes indeterminate {
-      0%   { transform: translateX(-100%); width: 40%; }
-      100% { transform: translateX(300%); width: 40%; }
-    }
+    .queue-list{max-height:280px}
+    .history-list{max-height:400px}
+    .error-list{max-height:200px}
 
-    /* =====================================================================
-       QUEUE
-    ===================================================================== */
-    .queue-list {
-      display: flex; flex-direction: column; gap: var(--space-2);
-      max-height: 280px; overflow-y: auto;
+    .queue-item,.history-item,.error-item{
+      border-radius:var(--radius-md);animation:slideIn .2s ease-out;
     }
-    .queue-item {
-      display: flex; align-items: center; gap: var(--space-3);
-      padding: var(--space-2) var(--space-3);
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      font-size: var(--text-sm);
-      animation: slideIn 0.2s ease-out;
-    }
-    @keyframes slideIn {
-      from { opacity: 0; transform: translateY(-4px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-    .queue-priority {
-      font-size: var(--text-xs);
-      font-weight: 700;
-      width: 20px; text-align: center;
-      color: var(--primary);
-      flex-shrink: 0;
-    }
-    .queue-text {
-      flex: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: var(--text-muted);
-    }
-    .queue-empty {
-      text-align: center;
-      color: var(--text-faint);
-      font-style: italic;
-      font-size: var(--text-sm);
-      padding: var(--space-6) 0;
-    }
+    @keyframes slideIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
 
-    /* =====================================================================
-       HISTORY
-    ===================================================================== */
-    .history-list {
-      display: flex; flex-direction: column; gap: var(--space-2);
-      max-height: 400px; overflow-y: auto;
+    .queue-item{
+      display:flex;align-items:center;gap:var(--space-3);
+      padding:var(--space-2) var(--space-3);
+      background:var(--surface-2);border:1px solid var(--border);
+      font-size:var(--text-sm);
     }
-    .history-item {
-      display: grid;
-      grid-template-columns: auto 1fr auto;
-      gap: var(--space-3);
-      align-items: start;
-      padding: var(--space-3);
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      font-size: var(--text-sm);
-      animation: slideIn 0.2s ease-out;
+    .queue-priority{font-size:var(--text-xs);font-weight:700;width:20px;text-align:center;color:var(--primary);flex-shrink:0}
+    .queue-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}
+    .queue-empty,.history-empty,.error-empty{
+      text-align:center;color:var(--text-faint);font-style:italic;
+      font-size:var(--text-sm);padding:var(--space-6) 0;
     }
-    .history-status {
-      width: 8px; height: 8px; border-radius: 50%;
-      margin-top: 6px; flex-shrink: 0;
-    }
-    .history-status.ok    { background: var(--success); }
-    .history-status.error { background: var(--error); }
-    .history-body { overflow: hidden; }
-    .history-text {
-      color: var(--text);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .history-meta {
-      font-size: var(--text-xs);
-      color: var(--text-muted);
-      margin-top: var(--space-1);
-      display: flex; gap: var(--space-3);
-    }
-    .history-time {
-      font-size: var(--text-xs);
-      color: var(--text-faint);
-      white-space: nowrap;
-    }
-    .history-empty {
-      text-align: center;
-      color: var(--text-faint);
-      font-style: italic;
-      font-size: var(--text-sm);
-      padding: var(--space-8) 0;
-    }
+    .history-empty{padding:var(--space-8) 0}
 
-    /* =====================================================================
+    .history-item{
+      display:grid;grid-template-columns:auto 1fr auto;
+      gap:var(--space-3);align-items:start;
+      padding:var(--space-3);
+      background:var(--surface-2);border:1px solid var(--border);
+      font-size:var(--text-sm);
+    }
+    .history-status{width:8px;height:8px;border-radius:50%;margin-top:6px;flex-shrink:0}
+    .history-status.ok{background:var(--success)}
+    .history-status.error{background:var(--error)}
+    .history-body{overflow:hidden}
+    .history-text{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .history-meta{font-size:var(--text-xs);color:var(--text-muted);margin-top:var(--space-1);display:flex;gap:var(--space-3);flex-wrap:wrap}
+    .history-time{font-size:var(--text-xs);color:var(--text-faint);white-space:nowrap}
+
+    .error-item{
+      padding:var(--space-2) var(--space-3);
+      background:var(--error-dim);border:1px solid var(--error);
+      font-size:var(--text-xs);color:var(--error);
+    }
+    .error-time{color:var(--text-muted);margin-right:var(--space-2)}
+
+    /* ===================================================================
        SERVER STATUS
-    ===================================================================== */
-    .status-row {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: var(--space-2) 0;
-      border-bottom: 1px solid var(--border);
-      font-size: var(--text-sm);
+    =================================================================== */
+    .status-row{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:var(--space-2) 0;border-bottom:1px solid var(--border);
+      font-size:var(--text-sm);
     }
-    .status-row:last-child { border-bottom: none; }
-    .status-label { color: var(--text-muted); }
-    .status-value { font-weight: 500; font-variant-numeric: tabular-nums; }
+    .status-row:last-child{border-bottom:none}
+    .status-label{color:var(--text-muted)}
+    .status-value{font-weight:500;font-variant-numeric:tabular-nums}
 
-    /* =====================================================================
-       ERROR LOG
-    ===================================================================== */
-    .error-list {
-      display: flex; flex-direction: column; gap: var(--space-2);
-      max-height: 200px; overflow-y: auto;
-    }
-    .error-item {
-      padding: var(--space-2) var(--space-3);
-      background: var(--error-dim);
-      border: 1px solid var(--error);
-      border-radius: var(--radius-md);
-      font-size: var(--text-xs);
-      color: var(--error);
-      animation: slideIn 0.2s ease-out;
-    }
-    .error-time { color: var(--text-muted); margin-right: var(--space-2); }
-    .error-empty {
-      text-align: center;
-      color: var(--text-faint);
-      font-style: italic;
-      font-size: var(--text-sm);
-      padding: var(--space-4) 0;
-    }
-
-    /* =====================================================================
+    /* ===================================================================
        SCROLLBAR
-    ===================================================================== */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb {
-      background: var(--border);
-      border-radius: var(--radius-full);
-    }
-    ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+    =================================================================== */
+    ::-webkit-scrollbar{width:6px;height:6px}
+    ::-webkit-scrollbar-track{background:transparent}
+    ::-webkit-scrollbar-thumb{background:var(--border);border-radius:var(--radius-full)}
+    ::-webkit-scrollbar-thumb:hover{background:var(--text-faint)}
 
-    /* =====================================================================
-       FOOTER
-    ===================================================================== */
-    .footer {
-      text-align: center;
-      padding: var(--space-6);
-      font-size: var(--text-xs);
-      color: var(--text-faint);
-      border-top: 1px solid var(--border);
+    .footer{
+      text-align:center;padding:var(--space-6);
+      font-size:var(--text-xs);color:var(--text-faint);
+      border-top:1px solid var(--border);
     }
   </style>
 </head>
 <body>
 
-<!-- ======================================================================
-     HEADER
-====================================================================== -->
 <header class="header" role="banner">
   <div class="header-brand">
-    <!-- Inline SVG Logo -->
     <svg class="header-logo" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="TTS-Alarmserver Logo">
-      <rect width="36" height="36" rx="8" fill="#f85149" />
+      <rect width="36" height="36" rx="8" fill="#f85149"/>
       <path d="M10 26 L18 10 L26 26" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
       <path d="M13.5 21 H22.5" stroke="white" stroke-width="2" stroke-linecap="round"/>
       <circle cx="28" cy="10" r="3" fill="white" opacity="0.9"/>
@@ -457,9 +266,6 @@
   </div>
 </header>
 
-<!-- ======================================================================
-     MAIN
-====================================================================== -->
 <main class="main" id="main">
 
   <!-- KPI-Leiste -->
@@ -472,34 +278,12 @@
       <span class="badge badge-muted" id="lastUpdate">--</span>
     </div>
     <div class="kpi-grid">
-      <div class="kpi">
-        <div class="kpi-label">Status</div>
-        <div class="kpi-value" id="kpiStatus" style="color:var(--text-faint)">--</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">Alarmierungen</div>
-        <div class="kpi-value" id="kpiTotal">0</div>
-        <div class="kpi-sub">gesamt</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">Queue</div>
-        <div class="kpi-value" id="kpiQueue">0</div>
-        <div class="kpi-sub">wartend</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">Fehler</div>
-        <div class="kpi-value" id="kpiErrors" style="color:var(--error)">0</div>
-        <div class="kpi-sub">gesamt</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">Uptime</div>
-        <div class="kpi-value" id="kpiUptime" style="font-size:var(--text-base)">--</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">RAM</div>
-        <div class="kpi-value" id="kpiMemory" style="font-size:var(--text-base)">--</div>
-        <div class="kpi-sub">Heap used</div>
-      </div>
+      <div class="kpi"><div class="kpi-label">Status</div><div class="kpi-value" id="kpiStatus" style="color:var(--text-faint)">--</div></div>
+      <div class="kpi"><div class="kpi-label">Alarmierungen</div><div class="kpi-value" id="kpiTotal">0</div><div class="kpi-sub">gesamt</div></div>
+      <div class="kpi"><div class="kpi-label">Queue</div><div class="kpi-value" id="kpiQueue">0</div><div class="kpi-sub">wartend</div></div>
+      <div class="kpi"><div class="kpi-label">Fehler</div><div class="kpi-value" id="kpiErrors" style="color:var(--error)">0</div><div class="kpi-sub">gesamt</div></div>
+      <div class="kpi"><div class="kpi-label">Uptime</div><div class="kpi-value" id="kpiUptime" style="font-size:var(--text-base)">--</div></div>
+      <div class="kpi"><div class="kpi-label">RAM</div><div class="kpi-value" id="kpiMemory" style="font-size:var(--text-base)">--</div><div class="kpi-sub">Heap used</div></div>
     </div>
   </div>
 
@@ -517,12 +301,10 @@
       <div class="current-meta" id="currentMeta" style="display:none">
         <span id="currentId"></span>
         <span id="currentVoice"></span>
-        <span id="currentSource"></span>
+        <span id="currentDuration"></span>
       </div>
     </div>
-    <div class="progress-bar-wrap">
-      <div class="progress-bar" id="progressBar"></div>
-    </div>
+    <div class="progress-bar-wrap"><div class="progress-bar" id="progressBar"></div></div>
   </div>
 
   <!-- Queue -->
@@ -534,9 +316,7 @@
       </div>
       <span class="badge badge-primary" id="queueBadge">0</span>
     </div>
-    <div class="queue-list" id="queueList">
-      <div class="queue-empty">Warteschlange ist leer.</div>
-    </div>
+    <div class="queue-list" id="queueList"><div class="queue-empty">Warteschlange ist leer.</div></div>
   </div>
 
   <!-- Alarmhistorie -->
@@ -548,9 +328,7 @@
       </div>
       <span class="badge badge-muted" id="historyBadge">0</span>
     </div>
-    <div class="history-list" id="historyList">
-      <div class="history-empty">Noch keine Alarmierungen.</div>
-    </div>
+    <div class="history-list" id="historyList"><div class="history-empty">Noch keine Alarmierungen.</div></div>
   </div>
 
   <!-- Server-Info -->
@@ -580,9 +358,7 @@
       </div>
       <span class="badge badge-error" id="errorBadge">0</span>
     </div>
-    <div class="error-list" id="errorList">
-      <div class="error-empty">Keine Fehler.</div>
-    </div>
+    <div class="error-list" id="errorList"><div class="error-empty">Keine Fehler.</div></div>
   </div>
 
 </main>
@@ -592,402 +368,403 @@
   <a href="https://github.com/TobiasKWF/tts-alarmserver" target="_blank" rel="noopener">GitHub</a>
 </footer>
 
-<!-- ======================================================================
-     JAVASCRIPT
-====================================================================== -->
 <script>
-(function () {
-  'use strict';
+(function(){
+'use strict';
 
-  // -------------------------------------------------------------------
-  // State
-  // -------------------------------------------------------------------
-  const state = {
-    connected: false,
-    totalAlarms: 0,
-    failedAlarms: 0,
-    queueSize: 0,
-    currentAlarm: null,
-    history: [],
-    errors: [],
-    server: {},
-    queue: {},
-    rtp: {},
-    wsClients: 0,
-  };
+// -----------------------------------------------------------------------
+// State
+// -----------------------------------------------------------------------
+const state = {
+  connected:    false,
+  totalAlarms:  0,
+  failedAlarms: 0,
+  queueSize:    0,
+  currentAlarm: null,
+  history:      [],
+  errors:       [],
+  serverUptimeBase: null,  // Date when server started (estimated)
+};
 
-  // -------------------------------------------------------------------
-  // Theme
-  // -------------------------------------------------------------------
-  const html = document.documentElement;
-  let theme = html.dataset.theme || 'dark';
+// -----------------------------------------------------------------------
+// Theme
+// -----------------------------------------------------------------------
+const html  = document.documentElement;
+let   theme = html.dataset.theme || 'dark';
 
-  document.getElementById('themeToggle').addEventListener('click', () => {
-    theme = theme === 'dark' ? 'light' : 'dark';
-    html.dataset.theme = theme;
-    updateThemeIcon();
+document.getElementById('themeToggle').addEventListener('click', () => {
+  theme = theme === 'dark' ? 'light' : 'dark';
+  html.dataset.theme = theme;
+  updateThemeIcon();
+});
+
+function updateThemeIcon() {
+  document.getElementById('themeToggle').innerHTML = theme === 'dark'
+    ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>`
+    : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
+}
+
+// -----------------------------------------------------------------------
+// WebSocket mit Auto-Reconnect
+// -----------------------------------------------------------------------
+let ws             = null;
+let reconnectDelay = 1000;
+const MAX_DELAY    = 30_000;
+
+function wsConnect() {
+  // Pfad /ws explizit angeben
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url   = `${proto}://${location.host}/ws`;
+
+  ws = new WebSocket(url);
+
+  ws.addEventListener('open', () => {
+    state.connected = true;
+    reconnectDelay  = 1000;
+    setWsStatus(true, 'Verbunden');
+    updateKpis();
   });
 
-  function updateThemeIcon() {
-    const btn = document.getElementById('themeToggle');
-    btn.innerHTML = theme === 'dark'
-      ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>`
-      : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
-  }
+  ws.addEventListener('message', (evt) => {
+    try { handleMessage(JSON.parse(evt.data)); } catch(_) {}
+  });
 
-  // -------------------------------------------------------------------
-  // WebSocket mit Auto-Reconnect
-  // -------------------------------------------------------------------
-  let ws = null;
-  let reconnectDelay = 1000;
-  const MAX_RECONNECT_DELAY = 30000;
-
-  function wsConnect() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url   = `${proto}://${location.host}`;
-
-    ws = new WebSocket(url);
-
-    ws.addEventListener('open', () => {
-      state.connected = true;
-      reconnectDelay = 1000;
-      setWsStatus(true, 'Verbunden');
-    });
-
-    ws.addEventListener('message', (evt) => {
-      try {
-        const msg = JSON.parse(evt.data);
-        handleMessage(msg);
-      } catch (_) { /* ignorieren */ }
-    });
-
-    ws.addEventListener('close', () => {
-      state.connected = false;
-      setWsStatus(false, `Reconnect in ${Math.round(reconnectDelay / 1000)}s…`);
-      setTimeout(() => {
-        reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_RECONNECT_DELAY);
-        wsConnect();
-      }, reconnectDelay);
-    });
-
-    ws.addEventListener('error', () => {
-      ws.close();
-    });
-  }
-
-  function setWsStatus(connected, label) {
-    const dot   = document.getElementById('wsDot');
-    const lbl   = document.getElementById('wsLabel');
-    dot.className = 'ws-dot' + (connected ? ' connected' : '');
-    lbl.textContent = label;
-  }
-
-  // -------------------------------------------------------------------
-  // Message-Handler
-  // -------------------------------------------------------------------
-  function handleMessage(msg) {
-    switch (msg.type) {
-
-      case 'state': {
-        // Initialer Snapshot beim Connect
-        if (msg.stats) applyStats(msg.stats);
-        if (msg.queue) applyQueue(msg.queue);
-        if (msg.history) applyHistory(msg.history);
-        break;
-      }
-
-      case 'alarm.received': {
-        state.totalAlarms++;
-        if (msg.data) addQueueItem(msg.data);
-        updateKpis();
-        break;
-      }
-
-      case 'tts.started':
-      case 'stream.started': {
-        const d = msg.data || {};
-        state.currentAlarm = d;
-        setCurrentAnnouncement(d, true);
-        break;
-      }
-
-      case 'alarm.finished':
-      case 'tts.finished':
-      case 'stream.finished': {
-        const d = msg.data || {};
-        if (msg.type === 'alarm.finished') {
-          addHistoryItem(d);
-          removeQueueItem(d.alarmId || d.id);
-          if (d.error) state.failedAlarms++;
-        }
-        if (msg.type === 'stream.finished') {
-          setCurrentAnnouncement(null, false);
-          state.currentAlarm = null;
-        }
-        updateKpis();
-        break;
-      }
-
-      case 'queue.changed': {
-        if (msg.data) applyQueue(msg.data);
-        break;
-      }
-
-      case 'stats.update':
-      case 'server.stats': {
-        if (msg.data) applyStats(msg.data);
-        break;
-      }
-
-      case 'error': {
-        addErrorItem(msg.data || { message: msg.message || 'Unbekannter Fehler' });
-        state.failedAlarms++;
-        updateKpis();
-        break;
-      }
-    }
-
-    setLastUpdate();
-  }
-
-  // -------------------------------------------------------------------
-  // Stats-Update
-  // -------------------------------------------------------------------
-  function applyStats(data) {
-    if (data.server) {
-      state.server = data.server;
-      el('srvVersion').textContent  = data.server.version || '--';
-      el('srvEnv').textContent      = data.server.nodeEnv || '--';
-      el('srvPid').textContent      = data.server.pid || '--';
-      el('kpiUptime').textContent   = data.server.uptimeHuman || formatUptime(data.server.uptime || 0);
-      el('kpiMemory').textContent   = data.server.memory
-        ? `${data.server.memory.heapUsedMB} MB`
-        : '--';
-    }
-    if (data.queue) {
-      state.queue = data.queue;
-      el('kpiQueue').textContent    = data.queue.size ?? 0;
-      el('queueBadge').textContent  = data.queue.size ?? 0;
-      el('srvQueueMax').textContent = data.queue.maxSize ?? '--';
-    }
-    if (data.alarm) {
-      if (data.alarm.totalAlarms != null) state.totalAlarms  = data.alarm.totalAlarms;
-      if (data.alarm.failedAlarms != null) state.failedAlarms = data.alarm.failedAlarms;
-    }
-    if (data.rtp) {
-      el('srvRtp').textContent = `${data.rtp.host}:${data.rtp.port}`;
-    }
-    if (data.websocket) {
-      state.wsClients = data.websocket.connectedClients ?? 0;
-      el('srvWsClients').textContent = state.wsClients;
-    }
+  ws.addEventListener('close', () => {
+    state.connected = false;
+    setWsStatus(false, `Reconnect in ${Math.round(reconnectDelay/1000)}s…`);
     updateKpis();
-  }
+    setTimeout(() => {
+      reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_DELAY);
+      wsConnect();
+    }, reconnectDelay);
+  });
 
-  function applyQueue(queueData) {
-    const items = queueData.items || [];
-    state.queueSize = items.length;
-    el('queueBadge').textContent = items.length;
-    el('kpiQueue').textContent   = items.length;
-    renderQueue(items);
-  }
+  ws.addEventListener('error', () => ws.close());
+}
 
-  function applyHistory(historyData) {
-    state.history = Array.isArray(historyData) ? historyData : [];
-    renderHistory(state.history);
-  }
+function setWsStatus(connected, label) {
+  const dot = el('wsDot');
+  dot.className = 'ws-dot' + (connected ? ' connected' : '');
+  el('wsLabel').textContent = label;
+}
 
-  // -------------------------------------------------------------------
-  // KPIs
-  // -------------------------------------------------------------------
-  function updateKpis() {
-    el('kpiTotal').textContent  = state.totalAlarms;
-    el('kpiErrors').textContent = state.failedAlarms;
-    el('kpiStatus').textContent = state.connected ? 'Online' : 'Offline';
-    el('kpiStatus').style.color = state.connected ? 'var(--success)' : 'var(--error)';
-  }
+// -----------------------------------------------------------------------
+// Message-Handler
+// -----------------------------------------------------------------------
+function handleMessage(msg) {
+  switch (msg.type) {
 
-  function setLastUpdate() {
-    el('lastUpdate').textContent = new Date().toLocaleTimeString('de-DE');
-  }
+    // Initialer Snapshot beim Connect
+    case 'snapshot': {
+      if (msg.server)  applyServer(msg.server);
+      if (msg.queue)   applyQueueStats(msg.queue);
+      if (msg.alarm)   applyAlarmStats(msg.alarm);
+      if (msg.rtp)     el('srvRtp').textContent = `${msg.rtp.host}:${msg.rtp.port}`;
+      if (msg.websocket) el('srvWsClients').textContent = msg.websocket.connectedClients ?? 0;
+      if (msg.history) applyHistory(msg.history);
+      break;
+    }
 
-  // -------------------------------------------------------------------
-  // Aktuelle Durchsage
-  // -------------------------------------------------------------------
-  function setCurrentAnnouncement(data, active) {
-    const textEl   = el('currentText');
-    const metaEl   = el('currentMeta');
-    const barEl    = el('progressBar');
-    const badgeEl  = el('currentBadge');
+    // Regelmäßiges Stats-Update (alle 10s)
+    case 'server.stats': {
+      if (msg.server)    applyServer(msg.server);
+      if (msg.queue)     applyQueueStats(msg.queue);
+      if (msg.alarm)     applyAlarmStats(msg.alarm);
+      if (msg.rtp)       el('srvRtp').textContent = `${msg.rtp.host}:${msg.rtp.port}`;
+      if (msg.websocket) el('srvWsClients').textContent = msg.websocket.connectedClients ?? 0;
+      break;
+    }
 
-    if (active && data) {
-      textEl.textContent = data.text || '(unbekannt)';
-      textEl.classList.remove('idle');
-      el('currentId').textContent    = `ID: ${(data.alarmId || data.id || '').slice(0, 8)}…`;
-      el('currentVoice').textContent = data.voice ? `Stimme: ${data.voice}` : '';
-      el('currentSource').textContent = data.source ? `Quelle: ${data.source}` : '';
-      metaEl.style.display = 'flex';
-      barEl.classList.add('animate');
-      badgeEl.textContent = 'Aktiv';
-      badgeEl.className   = 'badge badge-success';
-    } else {
-      textEl.textContent = 'Keine aktive Durchsage.';
-      textEl.classList.add('idle');
-      metaEl.style.display = 'none';
-      barEl.classList.remove('animate');
-      barEl.style.width = '0%';
-      badgeEl.textContent = 'Idle';
-      badgeEl.className   = 'badge badge-muted';
+    case 'alarm.received': {
+      // Nur Zähler erhöhen; Queue wird über queue.changed aktualisiert
+      state.totalAlarms++;
+      updateKpis();
+      break;
+    }
+
+    case 'alarm.started': {
+      setCurrentAnnouncement(msg, true);
+      break;
+    }
+
+    case 'alarm.finished': {
+      addHistoryItem({ ...msg, status: 'success' });
+      setCurrentAnnouncement(null, false);
+      state.currentAlarm = null;
+      updateKpis();
+      break;
+    }
+
+    case 'alarm.failed': {
+      state.failedAlarms++;
+      addHistoryItem({ ...msg, status: 'failed', error: msg.error });
+      addErrorItem({ message: msg.error || 'Alarm fehlgeschlagen', code: msg.code });
+      setCurrentAnnouncement(null, false);
+      state.currentAlarm = null;
+      updateKpis();
+      break;
+    }
+
+    case 'tts.started': {
+      // Aktuelle Durchsage aktualisieren falls alarm.started noch nicht kam
+      if (!state.currentAlarm) setCurrentAnnouncement(msg, true);
+      break;
+    }
+
+    case 'stream.finished': {
+      // Progressbar stoppen (alarm.finished kommt gleich danach)
+      el('progressBar').classList.remove('animate');
+      break;
+    }
+
+    case 'tts.error':
+    case 'stream.error': {
+      addErrorItem({ message: msg.error || msg.type, code: msg.type });
+      break;
+    }
+
+    case 'queue.changed': {
+      applyQueueItems(msg.items || []);
+      break;
+    }
+
+    case 'queue.empty': {
+      applyQueueItems([]);
+      break;
     }
   }
 
-  // -------------------------------------------------------------------
-  // Queue-Rendering
-  // -------------------------------------------------------------------
-  function renderQueue(items) {
-    const list = el('queueList');
-    if (!items || items.length === 0) {
-      list.innerHTML = '<div class="queue-empty">Warteschlange ist leer.</div>';
-      return;
-    }
-    list.innerHTML = items.map(item => `
-      <div class="queue-item" data-id="${esc(item.id || '')}">  
-        <div class="queue-priority">${item.priority || 5}</div>
-        <div class="queue-text">${esc(item.text || '(Audiodatei)')}</div>
-        <span class="badge badge-muted">${esc(item.source || 'api')}</span>
-      </div>
-    `).join('');
+  el('lastUpdate').textContent = new Date().toLocaleTimeString('de-DE');
+}
+
+// -----------------------------------------------------------------------
+// Apply-Funktionen
+// -----------------------------------------------------------------------
+function applyServer(server) {
+  el('srvVersion').textContent  = server.version  || '--';
+  el('srvEnv').textContent      = server.nodeEnv  || '--';
+  el('srvPid').textContent      = server.pid      || '--';
+  el('kpiUptime').textContent   = server.uptimeHuman || formatUptime(server.uptime || 0);
+  el('kpiMemory').textContent   = server.memory ? `${server.memory.heapUsedMB} MB` : '--';
+  // Uptime-Basis setzen für lokalen Ticker
+  if (server.uptime != null) {
+    state.serverUptimeBase = Date.now() - server.uptime * 1000;
   }
+}
 
-  function addQueueItem(data) {
-    state.history.unshift(data);
-    // Queue-Anzeige wird über queue.changed-Event aktualisiert
-  }
+function applyQueueStats(queue) {
+  const size = queue.size ?? 0;
+  el('kpiQueue').textContent    = size;
+  el('queueBadge').textContent  = size;
+  el('srvQueueMax').textContent = queue.maxSize ?? '--';
+  if (queue.items) renderQueue(queue.items);
+  if (queue.failedTotal != null) state.failedAlarms = queue.failedTotal;
+}
 
-  function removeQueueItem(id) {
-    const item = el('queueList').querySelector(`[data-id="${id}"]`);
-    if (item) item.remove();
-    const list = el('queueList');
-    if (list.children.length === 0) {
-      list.innerHTML = '<div class="queue-empty">Warteschlange ist leer.</div>';
-    }
-  }
-
-  // -------------------------------------------------------------------
-  // History-Rendering
-  // -------------------------------------------------------------------
-  function addHistoryItem(data) {
-    state.history.unshift(data);
-    if (state.history.length > 50) state.history.pop();
-    renderHistory(state.history);
-    el('historyBadge').textContent = state.history.length;
-  }
-
-  function renderHistory(items) {
-    const list = el('historyList');
-    el('historyBadge').textContent = items.length;
-    if (!items || items.length === 0) {
-      list.innerHTML = '<div class="history-empty">Noch keine Alarmierungen.</div>';
-      return;
-    }
-    list.innerHTML = items.map(item => `
-      <div class="history-item">
-        <div class="history-status ${item.error ? 'error' : 'ok'}"></div>
-        <div class="history-body">
-          <div class="history-text">${esc(item.text || '(Audiodatei)')}</div>
-          <div class="history-meta">
-            <span>ID: ${esc((item.id || item.alarmId || '').slice(0, 8))}&hellip;</span>
-            ${item.voice ? `<span>Stimme: ${esc(item.voice)}</span>` : ''}
-            ${item.source ? `<span>Quelle: ${esc(item.source)}</span>` : ''}
-            ${item.error ? `<span style="color:var(--error)">${esc(item.error)}</span>` : ''}
-          </div>
-        </div>
-        <div class="history-time">${item.finishedAt ? formatTime(item.finishedAt) : ''}</div>
-      </div>
-    `).join('');
-  }
-
-  // -------------------------------------------------------------------
-  // Error-Log
-  // -------------------------------------------------------------------
-  function addErrorItem(data) {
-    const item = {
-      message: data.message || String(data),
-      time: new Date().toISOString(),
-    };
-    state.errors.unshift(item);
-    if (state.errors.length > 20) state.errors.pop();
-    renderErrors();
-    el('errorBadge').textContent = state.errors.length;
-  }
-
-  function renderErrors() {
-    const list = el('errorList');
-    if (state.errors.length === 0) {
-      list.innerHTML = '<div class="error-empty">Keine Fehler.</div>';
-      return;
-    }
-    list.innerHTML = state.errors.map(e => `
-      <div class="error-item">
-        <span class="error-time">${formatTime(e.time)}</span>${esc(e.message)}
-      </div>
-    `).join('');
-  }
-
-  // -------------------------------------------------------------------
-  // Statistik-Polling (Fallback wenn WebSocket-Stats fehlen)
-  // -------------------------------------------------------------------
-  function startStatsPoll() {
-    fetchStats();
-    setInterval(fetchStats, 30000);
-  }
-
-  async function fetchStats() {
-    try {
-      const res = await fetch('/stats');
-      if (!res.ok) return;
-      const data = await res.json();
-      applyStats(data);
-      if (data.history) applyHistory(data.history);
-    } catch (_) { /* Server nicht erreichbar */ }
-  }
-
-  // -------------------------------------------------------------------
-  // Hilfsfunktionen
-  // -------------------------------------------------------------------
-  function el(id) { return document.getElementById(id); }
-
-  function esc(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  function formatTime(iso) {
-    try {
-      return new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    } catch (_) { return iso; }
-  }
-
-  function formatUptime(seconds) {
-    const d = Math.floor(seconds / 86400);
-    const h = Math.floor((seconds % 86400) / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    if (d > 0) return `${d}d ${h}h ${m}m`;
-    if (h > 0) return `${h}h ${m}m ${s}s`;
-    return `${m}m ${s}s`;
-  }
-
-  // -------------------------------------------------------------------
-  // Init
-  // -------------------------------------------------------------------
-  wsConnect();
-  startStatsPoll();
+function applyAlarmStats(alarm) {
+  if (alarm.totalAlarms  != null) state.totalAlarms  = alarm.totalAlarms;
+  if (alarm.failedAlarms != null) state.failedAlarms = alarm.failedAlarms;
   updateKpis();
-  updateThemeIcon();
+}
+
+function applyHistory(items) {
+  state.history = Array.isArray(items) ? [...items] : [];
+  renderHistory(state.history);
+}
+
+function applyQueueItems(items) {
+  const size = items.length;
+  state.queueSize = size;
+  el('kpiQueue').textContent   = size;
+  el('queueBadge').textContent = size;
+  renderQueue(items);
+}
+
+// -----------------------------------------------------------------------
+// KPIs
+// -----------------------------------------------------------------------
+function updateKpis() {
+  el('kpiTotal').textContent  = state.totalAlarms;
+  el('kpiErrors').textContent = state.failedAlarms;
+  el('kpiStatus').textContent = state.connected ? 'Online' : 'Offline';
+  el('kpiStatus').style.color = state.connected ? 'var(--success)' : 'var(--error)';
+}
+
+// Lokaler Uptime-Ticker (aktualisiert jede Sekunde)
+setInterval(() => {
+  if (state.serverUptimeBase == null) return;
+  const elapsed = Math.floor((Date.now() - state.serverUptimeBase) / 1000);
+  el('kpiUptime').textContent = formatUptime(elapsed);
+}, 1000);
+
+// -----------------------------------------------------------------------
+// Aktuelle Durchsage
+// -----------------------------------------------------------------------
+function setCurrentAnnouncement(data, active) {
+  const textEl  = el('currentText');
+  const metaEl  = el('currentMeta');
+  const barEl   = el('progressBar');
+  const badgeEl = el('currentBadge');
+
+  if (active && data) {
+    state.currentAlarm = data;
+    textEl.textContent = data.text || '(unbekannt)';
+    textEl.classList.remove('idle');
+    el('currentId').textContent    = `ID: ${String(data.alarmId || data.id || '').slice(0,8)}…`;
+    el('currentVoice').textContent = data.voice ? `Stimme: ${data.voice}` : '';
+    el('currentDuration').textContent = '';
+    metaEl.style.display = 'flex';
+    barEl.classList.add('animate');
+    badgeEl.textContent = 'Aktiv';
+    badgeEl.className   = 'badge badge-success';
+  } else {
+    state.currentAlarm = null;
+    textEl.textContent = 'Keine aktive Durchsage.';
+    textEl.classList.add('idle');
+    metaEl.style.display = 'none';
+    barEl.classList.remove('animate');
+    barEl.style.width = '0%';
+    badgeEl.textContent = 'Idle';
+    badgeEl.className   = 'badge badge-muted';
+  }
+}
+
+// -----------------------------------------------------------------------
+// Queue-Rendering
+// -----------------------------------------------------------------------
+function renderQueue(items) {
+  const list = el('queueList');
+  if (!items || items.length === 0) {
+    list.innerHTML = '<div class="queue-empty">Warteschlange ist leer.</div>';
+    return;
+  }
+  list.innerHTML = items.map(item => `
+    <div class="queue-item">
+      <div class="queue-priority">${item.priority || 5}</div>
+      <div class="queue-text">${esc(item.text || '(Audiodatei)')}</div>
+      <span class="badge badge-muted">${esc(item.source || 'api')}</span>
+    </div>
+  `).join('');
+}
+
+// -----------------------------------------------------------------------
+// History-Rendering
+// -----------------------------------------------------------------------
+function addHistoryItem(data) {
+  const entry = {
+    alarmId:    data.alarmId || data.id,
+    text:       data.text       || state.currentAlarm?.text || '(unbekannt)',
+    voice:      data.voice      || state.currentAlarm?.voice,
+    status:     data.status     || (data.error ? 'failed' : 'success'),
+    error:      data.error,
+    durationMs: data.durationMs,
+    finishedAt: new Date().toISOString(),
+  };
+  state.history.unshift(entry);
+  if (state.history.length > 100) state.history.pop();
+  renderHistory(state.history);
+}
+
+function renderHistory(items) {
+  const list = el('historyList');
+  el('historyBadge').textContent = items.length;
+  if (!items || items.length === 0) {
+    list.innerHTML = '<div class="history-empty">Noch keine Alarmierungen.</div>';
+    return;
+  }
+  list.innerHTML = items.slice(0, 50).map(item => `
+    <div class="history-item">
+      <div class="history-status ${item.error || item.status === 'failed' ? 'error' : 'ok'}"></div>
+      <div class="history-body">
+        <div class="history-text">${esc(item.text || '(Audiodatei)')}</div>
+        <div class="history-meta">
+          <span>ID: ${esc(String(item.alarmId || '').slice(0,8))}&hellip;</span>
+          ${item.voice      ? `<span>Stimme: ${esc(item.voice)}</span>` : ''}
+          ${item.durationMs ? `<span>${item.durationMs}ms</span>` : ''}
+          ${item.error      ? `<span style="color:var(--error)">${esc(item.error)}</span>` : ''}
+        </div>
+      </div>
+      <div class="history-time">${item.finishedAt ? formatTime(item.finishedAt) : ''}</div>
+    </div>
+  `).join('');
+}
+
+// -----------------------------------------------------------------------
+// Error-Log
+// -----------------------------------------------------------------------
+function addErrorItem(data) {
+  state.errors.unshift({ message: data.message || String(data), code: data.code, time: new Date().toISOString() });
+  if (state.errors.length > 20) state.errors.pop();
+  renderErrors();
+}
+
+function renderErrors() {
+  const list = el('errorList');
+  el('errorBadge').textContent = state.errors.length;
+  if (state.errors.length === 0) {
+    list.innerHTML = '<div class="error-empty">Keine Fehler.</div>';
+    return;
+  }
+  list.innerHTML = state.errors.map(e => `
+    <div class="error-item">
+      <span class="error-time">${formatTime(e.time)}</span>
+      ${e.code ? `[${esc(e.code)}] ` : ''}${esc(e.message)}
+    </div>
+  `).join('');
+}
+
+// -----------------------------------------------------------------------
+// Statistik-Polling als Fallback (alle 30s wenn WS inaktiv)
+// -----------------------------------------------------------------------
+async function fetchStats() {
+  try {
+    const res  = await fetch('/stats');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.server)    applyServer(data.server);
+    if (data.queue)     applyQueueStats(data.queue);
+    if (data.alarm)     applyAlarmStats(data.alarm);
+    if (data.rtp)       el('srvRtp').textContent = `${data.rtp.host}:${data.rtp.port}`;
+    if (data.history)   applyHistory(data.history);
+  } catch (_) {}
+}
+
+setInterval(fetchStats, 30_000);
+
+// -----------------------------------------------------------------------
+// Hilfsfunktionen
+// -----------------------------------------------------------------------
+function el(id) { return document.getElementById(id); }
+
+function esc(str) {
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function formatTime(iso) {
+  try {
+    return new Date(iso).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  } catch(_){ return iso; }
+}
+
+function formatUptime(seconds) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  return `${m}m ${s}s`;
+}
+
+// -----------------------------------------------------------------------
+// Init
+// -----------------------------------------------------------------------
+wsConnect();
+fetchStats();
+updateKpis();
+updateThemeIcon();
 
 }());
 </script>
