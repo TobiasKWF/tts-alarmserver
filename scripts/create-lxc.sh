@@ -69,7 +69,7 @@ DEFAULT_BRIDGE="vmbr0"
 DEFAULT_IP="dhcp"
 DEFAULT_STORAGE="local-lvm"
 DEFAULT_TEMPLATE_STORAGE="local"
-DEBIAN_TEMPLATE="debian-13-standard_13.5-1_amd64.tar.zst"
+DEBIAN_TEMPLATE="debian-13-standard_13.1-2_amd64.tar.zst"
 INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/TobiasKWF/tts-alarmserver/main/scripts/install.sh"
 
 # -----------------------------------------------------------------------------
