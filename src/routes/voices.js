@@ -2,119 +2,111 @@
 
 /**
  * @file routes/voices.js
- * @description GET /voices  – Verfügbare TTS-Stimmen auflisten.
- *              POST /voice  – Standard-Stimme setzen (Laufzeit-Änderung).
+ * @description GET /voices, POST /voice – Stimmen-Verwaltung.
+ *
+ * Listet verfügbare Piper-Stimmen auf und erlaubt das
+ * Umschalten der Standard-Stimme zur Laufzeit.
  */
 
 const { Router } = require('express');
 const { body, validationResult } = require('express-validator');
-const fs = require('fs');
-const path = require('path');
 
-const config = require('../config');
+const logger = require('../utils/logger').child({ service: 'VoicesRoute' });
+const { PiperService } = require('../services/piperService');
 const { apiKeyAuth } = require('../middleware/apiKeyAuth');
 const { ValidationError, NotFoundError } = require('../errors');
-const logger = require('../utils/logger').child({ service: 'VoicesRoute' });
+const config = require('../config');
 
 const router = Router();
 
+// ---------------------------------------------------------------------------
+// GET /voices
+// ---------------------------------------------------------------------------
+
 /**
  * GET /voices
- * Listet alle verfügbaren ONNX-Stimmmodelle auf.
+ * Listet alle verfügbaren Piper-Stimmen auf.
+ *
+ * Response:
+ *   { ok: true, defaultVoice, voices: ["de_DE-thorsten-high", ...] }
  */
 router.get('/', (req, res) => {
-  const voicesDir = config.piper.voicesDir;
+  const piperService = PiperService.getInstance();
+  const voices = piperService.listVoices();
 
-  if (!fs.existsSync(voicesDir)) {
-    return res.json({ ok: true, voices: [], voicesDir });
-  }
+  logger.debug('Stimmen abgerufen', { count: voices.length, requestId: req.requestId });
 
-  let files;
-  try {
-    files = fs.readdirSync(voicesDir);
-  } catch (err) {
-    logger.error('Voices-Verzeichnis konnte nicht gelesen werden', {
-      voicesDir,
-      error: err.message,
-    });
-    return res.json({ ok: true, voices: [], voicesDir, error: err.message });
-  }
-
-  const voices = files
-    .filter((f) => f.endsWith('.onnx') && !f.endsWith('.onnx.json'))
-    .map((f) => {
-      const name = path.basename(f, '.onnx');
-      const configFile = path.join(voicesDir, `${f}.json`);
-      let meta = {};
-      if (fs.existsSync(configFile)) {
-        try {
-          const raw = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-          meta = {
-            language: raw.language?.code || null,
-            quality: raw.quality || null,
-            numSpeakers: raw.num_speakers || 1,
-          };
-        } catch (e) {
-          // Config-Parsing fehlgeschlagen – weiter ohne Metadaten
-        }
-      }
-      return {
-        name,
-        file: f,
-        isDefault: name === config.piper.defaultVoice,
-        ...meta,
-      };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  return res.json({
+  res.json({
     ok: true,
+    defaultVoice: config.piper.defaultVoice,
+    voicesDir: config.piper.voicesDir,
     voices,
-    default: config.piper.defaultVoice,
-    voicesDir,
-    count: voices.length,
   });
 });
 
+// ---------------------------------------------------------------------------
+// POST /voice
+// ---------------------------------------------------------------------------
+
 /**
  * POST /voice
- * Setzt die Standard-Stimme für neue Alarmierungen.
- * Benötigt API-Key.
+ * Ändert die Standard-Stimme zur Laufzeit.
+ * Erfordert API-Key-Authentifizierung.
+ *
+ * Body:
+ *   voice {string} – Pflicht. Name der gewünschten Stimme.
+ *
+ * Response 200:
+ *   { ok: true, voice, message }
+ *
+ * Response 400:
+ *   Ungültige Parameter
+ *
+ * Response 404:
+ *   Stimme nicht gefunden
  */
-router.post(
-  '/voice',
-  apiKeyAuth,
-  [
-    body('voice')
-      .isString().withMessage('voice muss ein String sein')
-      .trim()
-      .isLength({ min: 1, max: 100 }).withMessage('Ungültiger Voice-Name'),
-  ],
-  (req, res, next) => {
+router.post('/', apiKeyAuth, [
+  body('voice')
+    .isString().withMessage('voice muss ein String sein')
+    .trim()
+    .notEmpty().withMessage('voice darf nicht leer sein')
+    .isLength({ max: 200 }).withMessage('voice darf maximal 200 Zeichen lang sein'),
+], (req, res, next) => {
+  try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return next(new ValidationError('Ungültige Anfrage', { fields: errors.array() }));
+      const details = errors.array().reduce((acc, e) => { acc[e.path] = e.msg; return acc; }, {});
+      throw new ValidationError('Ungültige Anfrageparameter', details);
     }
 
     const { voice } = req.body;
-    const voicesDir = config.piper.voicesDir;
-    const modelFile = path.join(voicesDir, `${voice}.onnx`);
+    const piperService = PiperService.getInstance();
+    const available = piperService.listVoices();
 
-    if (!fs.existsSync(modelFile)) {
-      return next(new NotFoundError(`Stimme nicht gefunden: ${voice}`, { voice, voicesDir }));
+    // Prüfen ob die Stimme existiert
+    if (available.length > 0 && !available.includes(voice)) {
+      throw new NotFoundError(
+        `Stimme nicht gefunden: ${voice}`,
+        { available, requested: voice }
+      );
     }
 
-    // Laufzeit-Änderung der Standard-Stimme
+    // Laufzeit-Override der Standard-Stimme
     config.piper.defaultVoice = voice;
 
-    logger.info('Standard-Stimme geändert', { voice, requestId: req.requestId });
-
-    return res.json({
-      ok: true,
-      message: `Standard-Stimme geändert`,
+    logger.info('Standard-Stimme geändert', {
       voice,
+      requestId: req.requestId,
     });
+
+    res.json({
+      ok: true,
+      voice,
+      message: `Standard-Stimme auf "${voice}" gesetzt`,
+    });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
 module.exports = router;
