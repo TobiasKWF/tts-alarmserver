@@ -377,10 +377,11 @@
 // -----------------------------------------------------------------------
 const state = {
   connected:    false,
+  wsConnected:  false,   // echte WS-Verbindung (für Label-Unterscheidung)
   totalAlarms:  0,
   failedAlarms: 0,
   queueSize:    0,
-  currentAlarm: null,   // { alarmId, text, voice } – gesetzt von alarm.started
+  currentAlarm: null,
   history:      [],
   errors:       [],
   serverUptimeBase: null,
@@ -418,9 +419,10 @@ function wsConnect() {
   ws = new WebSocket(url);
 
   ws.addEventListener('open', () => {
-    state.connected = true;
-    reconnectDelay  = 1000;
-    setWsStatus(true, 'Verbunden');
+    state.wsConnected = true;
+    state.connected   = true;
+    reconnectDelay    = 1000;
+    setWsStatus(true, 'Live');
     updateKpis();
   });
 
@@ -429,8 +431,13 @@ function wsConnect() {
   });
 
   ws.addEventListener('close', () => {
-    state.connected = false;
-    setWsStatus(false, `Reconnect in ${Math.round(reconnectDelay/1000)}s…`);
+    state.wsConnected = false;
+    // connected bleibt true wenn fetchStats zuletzt erfolgreich war
+    if (!state.connected) {
+      setWsStatus(false, `Reconnect in ${Math.round(reconnectDelay/1000)}s…`);
+    } else {
+      setWsStatus(false, 'Polling');
+    }
     updateKpis();
     setTimeout(() => {
       reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_DELAY);
@@ -441,9 +448,11 @@ function wsConnect() {
   ws.addEventListener('error', () => ws.close());
 }
 
-function setWsStatus(connected, label) {
+function setWsStatus(wsOn, label) {
   const dot = el('wsDot');
-  dot.className = 'ws-dot' + (connected ? ' connected' : '');
+  // Dot grün wenn WS verbunden ODER fetchStats erfolgreich (state.connected)
+  const online = wsOn || state.connected;
+  dot.className = 'ws-dot' + (online ? ' connected' : '');
   el('wsLabel').textContent = label;
 }
 
@@ -472,21 +481,7 @@ function handleMessage(msg) {
       break;
     }
 
-    case 'alarm.received': {
-      // KEIN lokales Inkrementieren von totalAlarms hier.
-      // Der autoritätive Zähler kommt ausschließlich über snapshot / server.stats
-      // (alarm.stats.totalAlarms). Ein lokales Increment würde zu Double-Counting
-      // führen, da jeder neue WS-Client beim Reconnect einen snapshot erhält
-      // der den echten Serverstand enthält und totalAlarms überschreibt.
-      // Das queue.changed Event das gleichzeitig emittiert wird, aktualisiert
-      // die Queue-Anzeige bereits korrekt.
-      break;
-    }
-
     case 'alarm.started': {
-      // Text und Stimme zwischenspeichern, damit alarm.finished und
-      // alarm.failed noch darauf zugreifen können, nachdem currentAlarm
-      // gelöscht wurde.
       state.currentAlarm = {
         alarmId: msg.alarmId,
         text:    msg.text  || '',
@@ -497,13 +492,9 @@ function handleMessage(msg) {
     }
 
     case 'alarm.finished': {
-      // Text/Voice aus state.currentAlarm lesen BEVOR es gelöscht wird.
-      // alarm.finished selbst trägt keinen text (AlarmService emittiert
-      // nur { alarmId, durationMs, status }).
       const finishedAlarm = state.currentAlarm;
       setCurrentAnnouncement(null, false);
       state.currentAlarm = null;
-
       addHistoryItem({
         alarmId:    msg.alarmId,
         text:       finishedAlarm?.text || '',
@@ -516,16 +507,10 @@ function handleMessage(msg) {
     }
 
     case 'alarm.failed': {
-      // Text/Voice aus state.currentAlarm lesen BEVOR es gelöscht wird.
       const failedAlarm = state.currentAlarm;
       setCurrentAnnouncement(null, false);
       state.currentAlarm = null;
-
-      // failedAlarms-Zähler nur lokal erhöhen wenn server.stats nicht
-      // zeitnah einen aktualisierten Wert liefert (nächstes Intervall).
-      // Wird durch applyAlarmStats() überschrieben sobald server.stats eintrifft.
       state.failedAlarms++;
-
       addHistoryItem({
         alarmId: msg.alarmId,
         text:    failedAlarm?.text || '',
@@ -539,15 +524,8 @@ function handleMessage(msg) {
     }
 
     case 'tts.started': {
-      // Nur als Fallback wenn alarm.started noch nicht ankam.
-      // tts.started enthält kein text-Feld – wir setzen nur den
-      // alarmId damit die Progressbar sichtbar wird.
       if (!state.currentAlarm) {
-        state.currentAlarm = {
-          alarmId: msg.alarmId,
-          text:    '',
-          voice:   '',
-        };
+        state.currentAlarm = { alarmId: msg.alarmId, text: '', voice: '' };
         setCurrentAnnouncement(state.currentAlarm, true);
       }
       break;
@@ -594,20 +572,15 @@ function applyServer(server) {
 
 function applyQueueStats(queue) {
   const size = queue.size ?? 0;
-  // state.queueSize synchron halten damit KPI zwischen den
-  // server.stats-Zyklen korrekt bleibt.
   state.queueSize = size;
   el('kpiQueue').textContent    = size;
   el('queueBadge').textContent  = size;
   el('srvQueueMax').textContent = queue.maxSize ?? '--';
   if (queue.items) renderQueue(queue.items);
-  // failedTotal aus Queue-Statistik übernehmen wenn verfügbar.
-  // (QueueService zählt nur die vom Worker verarbeiteten Fehler.)
   if (queue.failedTotal != null) state.failedAlarms = queue.failedTotal;
 }
 
 function applyAlarmStats(alarm) {
-  // Autoritätive Zähler vom Server überschreiben lokale Schätzwerte.
   if (alarm.totalAlarms  != null) state.totalAlarms  = alarm.totalAlarms;
   if (alarm.failedAlarms != null) state.failedAlarms = alarm.failedAlarms;
   updateKpis();
@@ -618,11 +591,6 @@ function applyHistory(items) {
   renderHistory(state.history);
 }
 
-/**
- * Aktualisiert Queue-Anzeige und hält state.queueSize synchron.
- * Wird durch queue.changed und queue.empty Events aufgerufen.
- * @param {Array} items
- */
 function applyQueueItems(items) {
   const size = Array.isArray(items) ? items.length : 0;
   state.queueSize = size;
@@ -767,22 +735,42 @@ function renderErrors() {
 }
 
 // -----------------------------------------------------------------------
-// Statistik-Polling als Fallback (alle 30s)
+// Statistik-Polling als Fallback (alle 15s)
+// Setzt state.connected = true sobald /stats erreichbar ist,
+// damit kpiStatus "Online" zeigt auch wenn WebSocket nicht verbindet.
 // -----------------------------------------------------------------------
 async function fetchStats() {
   try {
     const res  = await fetch('/stats');
     if (!res.ok) return;
     const data = await res.json();
+
+    // Server ist erreichbar → connected = true (Fallback für WS-Ausfall)
+    if (!state.connected) {
+      state.connected = true;
+      setWsStatus(state.wsConnected, state.wsConnected ? 'Live' : 'Polling');
+      updateKpis();
+    }
+
     if (data.server)  applyServer(data.server);
     if (data.queue)   applyQueueStats(data.queue);
     if (data.alarm)   applyAlarmStats(data.alarm);
     if (data.rtp)     el('srvRtp').textContent = `${data.rtp.host}:${data.rtp.port}`;
+    if (data.websocket) el('srvWsClients').textContent = data.websocket.connectedClients ?? 0;
     if (data.history) applyHistory(data.history);
-  } catch (_) {}
+
+    el('lastUpdate').textContent = new Date().toLocaleTimeString('de-DE');
+  } catch (_) {
+    // Fetch fehlgeschlagen – nur Offline setzen wenn auch WS weg ist
+    if (!state.wsConnected) {
+      state.connected = false;
+      setWsStatus(false, 'Offline');
+      updateKpis();
+    }
+  }
 }
 
-setInterval(fetchStats, 30_000);
+setInterval(fetchStats, 15_000);
 
 // -----------------------------------------------------------------------
 // Hilfsfunktionen
@@ -815,7 +803,7 @@ function formatUptime(seconds) {
 // Init
 // -----------------------------------------------------------------------
 wsConnect();
-fetchStats();
+fetchStats();   // sofort beim Laden aufrufen – zeigt sofort Online
 updateKpis();
 updateThemeIcon();
 
