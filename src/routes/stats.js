@@ -2,11 +2,12 @@
 
 /**
  * @file routes/stats.js
- * @description GET /stats – Serverstatistiken und Queue-Status.
+ * @description GET /stats – Server- und Alarmstatistiken.
  */
 
 const { Router } = require('express');
-const { AlarmService } = require('../services/alarmService');
+const { QueueService } = require('../services/queueService');
+const HistoryService = require('../services/historyService');
 const { getClientCount } = require('../services/websocketService');
 const config = require('../config');
 
@@ -14,76 +15,50 @@ const router = Router();
 
 /**
  * GET /stats
- * Gibt aktuelle Serverstatistiken zurück.
+ * Gibt aktuelle Statistiken über Server, Queue und Alarmhistorie zurück.
  */
 router.get('/', (req, res) => {
-  const alarmService = AlarmService.getInstance();
-  const stats = alarmService.getStats();
+  const mem = process.memoryUsage();
+  const uptime = process.uptime();
+  const queueService = QueueService.getInstance();
 
   res.json({
     ok: true,
-    version: process.env.npm_package_version || '1.0.0',
-    uptime: process.uptime(),
-    pid: process.pid,
-    memory: process.memoryUsage(),
-    alarm: {
-      total: stats.total,
-      errors: stats.errors,
-      queueSize: stats.queueSize,
-      isProcessing: stats.isProcessing,
+    server: {
+      version: process.env.npm_package_version || '1.0.0',
+      nodeEnv: config.server.nodeEnv,
+      uptime: Math.floor(uptime),
+      uptimeHuman: _formatUptime(uptime),
+      pid: process.pid,
+      memory: {
+        heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
+        heapTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
+        rssMB: Math.round(mem.rss / 1024 / 1024),
+      },
     },
+    queue: {
+      size: queueService.size,
+      entries: queueService._getPublicQueue(),
+    },
+    alarms: HistoryService.getStats(),
     websocket: {
-      clients: getClientCount(),
+      connectedClients: getClientCount(),
     },
     config: {
-      rtp: {
-        host: config.rtp.host,
-        port: config.rtp.port,
-        codec: config.rtp.codec,
-      },
-      piper: {
-        defaultVoice: config.piper.defaultVoice,
-        speed: config.piper.speed,
-      },
-      queue: {
-        maxSize: config.queue.maxSize,
-      },
+      rtpHost: config.rtp.host,
+      rtpPort: config.rtp.port,
+      defaultVoice: config.piper.defaultVoice,
+      queueMaxSize: config.queue.maxSize,
     },
-    requestId: req.requestId,
   });
 });
 
-/**
- * GET /stats/history
- * Gibt die Alarm-Historie zurück.
- */
-router.get('/history', (req, res) => {
-  const limit = parseInt(req.query.limit, 10) || 50;
-  const alarmService = AlarmService.getInstance();
-  const history = alarmService.getHistory(Math.min(limit, 100));
-
-  res.json({
-    ok: true,
-    count: history.length,
-    history,
-    requestId: req.requestId,
-  });
-});
-
-/**
- * GET /stats/queue
- * Gibt den aktuellen Queue-Status zurück.
- */
-router.get('/queue', (req, res) => {
-  const alarmService = AlarmService.getInstance();
-  const stats = alarmService.getStats();
-
-  res.json({
-    ok: true,
-    queueSize: stats.queueSize,
-    isProcessing: stats.isProcessing,
-    requestId: req.requestId,
-  });
-});
+function _formatUptime(seconds) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return `${d}d ${h}h ${m}m ${s}s`;
+}
 
 module.exports = router;

@@ -2,100 +2,118 @@
 
 /**
  * @file routes/voices.js
- * @description GET /voices – Auflistung und Prüfung verfügbarer Piper-Stimmen.
- *              POST /voice  – Aktive Standard-Stimme setzen (zur Laufzeit).
+ * @description GET /voices  – Verfügbare TTS-Stimmen auflisten.
+ *              POST /voice  – Standard-Stimme setzen (Laufzeit-Änderung).
  */
 
 const { Router } = require('express');
 const { body, validationResult } = require('express-validator');
+const fs = require('fs');
+const path = require('path');
 
-const { listVoices, voiceExists } = require('../services/piperService');
-const { ValidationError, NotFoundError } = require('../errors');
 const config = require('../config');
+const { apiKeyAuth } = require('../middleware/apiKeyAuth');
+const { ValidationError, NotFoundError } = require('../errors');
+const logger = require('../utils/logger').child({ service: 'VoicesRoute' });
 
 const router = Router();
 
 /**
  * GET /voices
- * Listet alle verfügbaren Piper-Stimmen auf.
+ * Listet alle verfügbaren ONNX-Stimmmodelle auf.
  */
 router.get('/', (req, res) => {
-  const voices = listVoices();
+  const voicesDir = config.piper.voicesDir;
 
-  res.json({
+  if (!fs.existsSync(voicesDir)) {
+    return res.json({ ok: true, voices: [], voicesDir });
+  }
+
+  let files;
+  try {
+    files = fs.readdirSync(voicesDir);
+  } catch (err) {
+    logger.error('Voices-Verzeichnis konnte nicht gelesen werden', {
+      voicesDir,
+      error: err.message,
+    });
+    return res.json({ ok: true, voices: [], voicesDir, error: err.message });
+  }
+
+  const voices = files
+    .filter((f) => f.endsWith('.onnx') && !f.endsWith('.onnx.json'))
+    .map((f) => {
+      const name = path.basename(f, '.onnx');
+      const configFile = path.join(voicesDir, `${f}.json`);
+      let meta = {};
+      if (fs.existsSync(configFile)) {
+        try {
+          const raw = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+          meta = {
+            language: raw.language?.code || null,
+            quality: raw.quality || null,
+            numSpeakers: raw.num_speakers || 1,
+          };
+        } catch (e) {
+          // Config-Parsing fehlgeschlagen – weiter ohne Metadaten
+        }
+      }
+      return {
+        name,
+        file: f,
+        isDefault: name === config.piper.defaultVoice,
+        ...meta,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return res.json({
     ok: true,
-    defaultVoice: config.piper.defaultVoice,
-    count: voices.length,
     voices,
-    requestId: req.requestId,
+    default: config.piper.defaultVoice,
+    voicesDir,
+    count: voices.length,
   });
 });
 
 /**
- * GET /voices/:name
- * Gibt Details zu einer Stimme zurück.
- */
-router.get('/:name', (req, res, next) => {
-  try {
-    const { name } = req.params;
-    const exists = voiceExists(name);
-
-    if (!exists) {
-      throw new NotFoundError(`Stimme nicht gefunden: ${name}`, { voice: name });
-    }
-
-    res.json({
-      ok: true,
-      voice: name,
-      isDefault: name === config.piper.defaultVoice,
-      requestId: req.requestId,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-/**
  * POST /voice
- * Setzt die Standard-Stimme zur Laufzeit (nicht persistent).
- * Body: { voice: string }
+ * Setzt die Standard-Stimme für neue Alarmierungen.
+ * Benötigt API-Key.
  */
 router.post(
-  '/set-default',
+  '/voice',
+  apiKeyAuth,
   [
     body('voice')
+      .isString().withMessage('voice muss ein String sein')
       .trim()
-      .notEmpty().withMessage('voice ist erforderlich')
-      .isLength({ min: 1, max: 100 }).withMessage('voice darf maximal 100 Zeichen lang sein'),
+      .isLength({ min: 1, max: 100 }).withMessage('Ungültiger Voice-Name'),
   ],
   (req, res, next) => {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        throw new ValidationError('Ungültige Anfrage', { fields: errors.array() });
-      }
-
-      const { voice } = req.body;
-
-      if (!voiceExists(voice)) {
-        throw new NotFoundError(`Stimme nicht gefunden: ${voice}`, {
-          voice,
-          available: listVoices(),
-        });
-      }
-
-      // Laufzeit-Änderung (nicht persistent über Neustart)
-      config.piper.defaultVoice = voice;
-
-      res.json({
-        ok: true,
-        defaultVoice: voice,
-        message: 'Standard-Stimme geändert (gilt bis zum nächsten Neustart)',
-        requestId: req.requestId,
-      });
-    } catch (err) {
-      next(err);
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return next(new ValidationError('Ungültige Anfrage', { fields: errors.array() }));
     }
+
+    const { voice } = req.body;
+    const voicesDir = config.piper.voicesDir;
+    const modelFile = path.join(voicesDir, `${voice}.onnx`);
+
+    if (!fs.existsSync(modelFile)) {
+      return next(new NotFoundError(`Stimme nicht gefunden: ${voice}`, { voice, voicesDir }));
+    }
+
+    // Laufzeit-Änderung der Standard-Stimme
+    config.piper.defaultVoice = voice;
+
+    logger.info('Standard-Stimme geändert', { voice, requestId: req.requestId });
+
+    return res.json({
+      ok: true,
+      message: `Standard-Stimme geändert`,
+      voice,
+    });
   }
 );
 

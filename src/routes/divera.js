@@ -2,91 +2,103 @@
 
 /**
  * @file routes/divera.js
- * @description POST /divera – Divera 24/7 Webhook-Endpunkt.
- * Verarbeitet eingehende Divera-Alarm-Webhooks und wandelt sie
- * in TTS-Alarmierungen um.
+ * @description POST /divera – Divera 24/7 Webhook-Empfang.
+ * Empfängt Alarm-Webhooks von Divera 24/7 und leitet sie
+ * als TTS-Alarmierung weiter.
  */
 
 const { Router } = require('express');
 const { body, validationResult } = require('express-validator');
+const rateLimit = require('express-rate-limit');
 
-const logger = require('../utils/logger').child({ service: 'Route:divera' });
 const { AlarmService } = require('../services/alarmService');
 const { ValidationError } = require('../errors');
+const logger = require('../utils/logger').child({ service: 'DiveraRoute' });
 
 const router = Router();
 
-/**
- * Baut den Ansagetext aus dem Divera-Payload auf.
- * @param {object} payload
- * @returns {string}
- */
-function buildAnnouncement(payload) {
-  const parts = [];
-
-  if (payload.title) parts.push(payload.title);
-  if (payload.text) parts.push(payload.text);
-  if (payload.address) parts.push(`Adresse: ${payload.address}`);
-
-  return parts.join('. ').trim() || 'Alarm ohne Beschreibung';
-}
+/** Rate-Limiter für Divera-Webhooks */
+const diveraRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'RATE_LIMIT_EXCEEDED', message: 'Zu viele Anfragen.' },
+});
 
 /**
  * POST /divera
- * Erwartet einen Divera 24/7 Webhook-Payload:
- * { title?, text?, address?, priority?, voice?, gong? }
+ * Erwartet Divera-Webhook-Payload:
+ * {
+ *   title: string,        // Alarmtitel (z.B. "H1 - Türöffnung")
+ *   text?: string,        // Alarmtext / Meldungstext
+ *   address?: string,     // Einsatzort
+ *   keywords?: string,    // Stichwort (z.B. "HH1", "F2")
+ *   priority?: number,
+ *   ucr_self_status_id?: number  // Divera-interner Status
+ * }
  */
 router.post(
   '/',
+  diveraRateLimit,
   [
-    body('title').optional().trim().isLength({ max: 200 }),
-    body('text').optional().trim().isLength({ max: 800 }),
-    body('address').optional().trim().isLength({ max: 200 }),
+    body('title')
+      .isString().withMessage('title muss ein String sein')
+      .trim()
+      .isLength({ min: 1, max: 500 }),
+    body('text').optional().isString().trim().isLength({ max: 2000 }),
+    body('address').optional().isString().trim().isLength({ max: 500 }),
+    body('keywords').optional().isString().trim().isLength({ max: 200 }),
     body('priority').optional().isInt({ min: 1, max: 10 }),
-    body('voice').optional().trim().isLength({ max: 100 }),
-    body('gong').optional().trim().matches(/^[a-zA-Z0-9_\-\.]+$/),
   ],
   async (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return next(new ValidationError('Ungültiger Divera-Webhook', { fields: errors.array() }));
+    }
+
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        throw new ValidationError('Ungültiger Divera-Payload', { fields: errors.array() });
-      }
+      const { title, text, address, keywords, priority } = req.body;
 
-      const { title, text, address, priority, voice, gong } = req.body;
+      // TTS-Text aus Divera-Daten zusammenstellen
+      const parts = [];
 
-      if (!title && !text && !address) {
-        throw new ValidationError('Divera-Payload muss mindestens title, text oder address enthalten');
-      }
+      if (keywords) parts.push(keywords);
+      if (title) parts.push(title);
+      if (address) parts.push(`Einsatzort: ${address}`);
+      if (text && text !== title) parts.push(text);
 
-      const announcementText = buildAnnouncement({ title, text, address });
-      const alarmService = AlarmService.getInstance();
+      const ttsText = parts.join('. ');
 
-      const result = alarmService.receive({
-        text: announcementText,
-        voice,
-        priority: priority ? parseInt(priority, 10) : 1, // Divera-Alarme haben höchste Priorität
-        gong,
-        source: 'divera',
-        requestId: req.requestId,
-      });
-
-      logger.info('Divera-Alarm empfangen', {
-        id: result.id,
+      logger.info('Divera-Webhook empfangen', {
         title,
-        queuePosition: result.queuePosition,
+        keywords,
+        address,
         requestId: req.requestId,
       });
 
-      res.status(202).json({
-        ok: true,
-        id: result.id,
-        queued: result.queued,
-        queuePosition: result.queuePosition,
+      const alarmService = AlarmService.getInstance();
+      const result = alarmService.receive({
+        text: ttsText,
+        priority: priority || 8, // Divera-Alarme haben standardmäßig hohe Priorität
+        gong: true,
+        normalize: true,
+        source: 'divera',
+        diveraTitle: title,
+        diveraKeywords: keywords,
+        diveraAddress: address,
         requestId: req.requestId,
+      });
+
+      return res.status(202).json({
+        ok: true,
+        message: 'Divera-Alarm angenommen',
+        alarmId: result.id,
+        queuePosition: result.position,
+        text: ttsText,
       });
     } catch (err) {
-      next(err);
+      return next(err);
     }
   }
 );
