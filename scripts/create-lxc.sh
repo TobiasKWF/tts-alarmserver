@@ -8,14 +8,14 @@
 #    ./scripts/create-lxc.sh
 #
 #  Voraussetzungen:
-#    - Proxmox VE 7.x oder 8.x
+#    - Proxmox VE 7.x oder 8.x oder 9.x
 #    - Als root auf dem PVE-Host ausgeführt
 #    - Internetverbindung (Debian 13 Template + install.sh)
 # =============================================================================
 
-# WICHTIG: set -e NICHT verwenden – pvesm/awk-Pipes liefern exit 1 bei
-# leerer Ausgabe und würden das Script sofort beenden.
-set -uo pipefail
+# Kein set -e / set -o pipefail – pvesm/pct/grep geben exit 1 oder 2
+# bei leeren Ergebnissen zurück und würden das Script unkontrolliert beenden.
+# Fehlerbehandlung erfolgt explizit mit || error / || true pro Befehl.
 
 # -----------------------------------------------------------------------------
 # Farben & Hilfsfunktionen
@@ -42,23 +42,29 @@ section() {
 }
 
 require_root() {
-  [[ $EUID -eq 0 ]] || error "Dieses Script muss als root auf dem Proxmox-Host ausgeführt werden."
+  if [[ $EUID -ne 0 ]]; then
+    error "Dieses Script muss als root auf dem Proxmox-Host ausgeführt werden."
+  fi
 }
 
 require_proxmox() {
-  command -v pct   &>/dev/null || error "pct nicht gefunden – dieses Script muss auf einem Proxmox VE Host ausgeführt werden."
-  command -v pvesm &>/dev/null || error "pvesm nicht gefunden – kein Proxmox VE Host?"
+  if ! command -v pct &>/dev/null; then
+    error "pct nicht gefunden – dieses Script muss auf einem Proxmox VE Host ausgeführt werden."
+  fi
+  if ! command -v pvesm &>/dev/null; then
+    error "pvesm nicht gefunden – kein Proxmox VE Host?"
+  fi
 }
 
 # -----------------------------------------------------------------------------
 # Standardwerte
 # -----------------------------------------------------------------------------
-DEFAULT_CTID=200
+DEFAULT_CTID=100
 DEFAULT_HOSTNAME="tts-alarmserver"
 DEFAULT_CORES=2
-DEFAULT_MEMORY=1024        # MB
-DEFAULT_SWAP=512           # MB
-DEFAULT_DISK=8             # GB
+DEFAULT_MEMORY=1024
+DEFAULT_SWAP=512
+DEFAULT_DISK=8
 DEFAULT_BRIDGE="vmbr0"
 DEFAULT_IP="dhcp"
 DEFAULT_STORAGE="local-lvm"
@@ -67,31 +73,26 @@ DEBIAN_TEMPLATE="debian-13-standard_13.5-1_amd64.tar.zst"
 INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/TobiasKWF/tts-alarmserver/main/scripts/install.sh"
 
 # -----------------------------------------------------------------------------
-# Hilfsfunktionen: verfügbare Ressourcen ermitteln
-# Robuste Variante: exit-code der Pipe wird ignoriert, Fallback bei leer
+# Hilfsfunktionen
 # -----------------------------------------------------------------------------
 get_storages() {
   local result
-  result=$(pvesm status 2>/dev/null | awk 'NR>1 {print $1}' | tr '\n' ' ') || true
+  result=$(pvesm status 2>/dev/null | awk 'NR>1 {print $1}' | tr '\n' ' ')
   echo "${result:-local-lvm}"
-}
-
-get_template_storages() {
-  local result
-  result=$(pvesm status 2>/dev/null | awk 'NR>1 {print $1}' | tr '\n' ' ') || true
-  echo "${result:-local}"
 }
 
 get_bridges() {
   local result
-  result=$(ip link show 2>/dev/null | grep -oP 'vmbr\d+' | sort -u | tr '\n' ' ') || true
+  result=$(ip link show 2>/dev/null | grep -oP 'vmbr\d+' | sort -u | tr '\n' ' ')
   echo "${result:-vmbr0}"
 }
 
 get_next_ctid() {
   local id=100
-  # Arithmetik-Increment: id+=1 statt ((id++)) vermeidet exit-code 1 bei 0
-  while pct status "$id" &>/dev/null 2>&1; do
+  while true; do
+    if ! pct status "$id" >/dev/null 2>&1; then
+      break
+    fi
     id=$((id + 1))
   done
   echo "$id"
@@ -99,8 +100,8 @@ get_next_ctid() {
 
 validate_ip() {
   local ip="$1"
-  [[ "$ip" == "dhcp" ]] && return 0
-  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$ ]] && return 0
+  if [[ "$ip" == "dhcp" ]]; then return 0; fi
+  if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$ ]]; then return 0; fi
   return 1
 }
 
@@ -110,22 +111,20 @@ validate_ip() {
 collect_config() {
   section "Konfiguration"
 
-  local next_id storages tmpl_storages bridges
-  next_id=$(get_next_ctid)       || next_id="$DEFAULT_CTID"
-  storages=$(get_storages)       || storages="local-lvm"
-  tmpl_storages=$(get_template_storages) || tmpl_storages="local"
-  bridges=$(get_bridges)         || bridges="vmbr0"
+  local next_id storages bridges
+  next_id=$(get_next_ctid)
+  storages=$(get_storages)
+  bridges=$(get_bridges)
 
-  echo -e "  Verfügbare Storages:           ${CYAN}${storages}${NC}"
-  echo -e "  Verfügbare Template-Storages:  ${CYAN}${tmpl_storages}${NC}"
-  echo -e "  Verfügbare Bridges:            ${CYAN}${bridges}${NC}"
+  echo -e "  Verfügbare Storages:   ${CYAN}${storages}${NC}"
+  echo -e "  Verfügbare Bridges:    ${CYAN}${bridges}${NC}"
   echo ""
 
-  # CTID
+  # Container ID
   ask "Container ID [${next_id}]:"
   read -r input_ctid
   CTID="${input_ctid:-$next_id}"
-  if pct status "$CTID" &>/dev/null 2>&1; then
+  if pct status "$CTID" >/dev/null 2>&1; then
     error "Container-ID ${CTID} existiert bereits. Bitte andere ID wählen."
   fi
 
@@ -134,17 +133,17 @@ collect_config() {
   read -r input_hostname
   CT_HOSTNAME="${input_hostname:-$DEFAULT_HOSTNAME}"
 
-  # Storage für Container-Disk
+  # Storage
   ask "Storage für Container-Disk [${DEFAULT_STORAGE}]:"
   read -r input_storage
   CT_STORAGE="${input_storage:-$DEFAULT_STORAGE}"
 
-  # Storage für Template
+  # Template-Storage
   ask "Storage für Debian-Template [${DEFAULT_TEMPLATE_STORAGE}]:"
   read -r input_tmpl_storage
   TMPL_STORAGE="${input_tmpl_storage:-$DEFAULT_TEMPLATE_STORAGE}"
 
-  # CPU-Kerne
+  # CPU
   ask "CPU-Kerne [${DEFAULT_CORES}]:"
   read -r input_cores
   CT_CORES="${input_cores:-$DEFAULT_CORES}"
@@ -169,39 +168,42 @@ collect_config() {
   read -r input_bridge
   CT_BRIDGE="${input_bridge:-$DEFAULT_BRIDGE}"
 
-  # IP-Adresse
+  # IP
   echo ""
   info "IP-Format: 'dhcp' oder '192.168.1.100/24'"
   ask "IP-Adresse [${DEFAULT_IP}]:"
   read -r input_ip
   CT_IP="${input_ip:-$DEFAULT_IP}"
   if ! validate_ip "$CT_IP"; then
-    error "Ungültiges IP-Format: ${CT_IP}. Erwartet: dhcp oder 192.168.1.100/24"
+    error "Ungültiges IP-Format: ${CT_IP}"
   fi
 
-  # Gateway (nur bei statischer IP)
+  # Gateway
+  CT_GW=""
   if [[ "$CT_IP" != "dhcp" ]]; then
     local default_gw
     default_gw=$(echo "$CT_IP" | sed 's/\.[0-9]*\/.*/.1/')
     ask "Gateway [${default_gw}]:"
     read -r input_gw
     CT_GW="${input_gw:-$default_gw}"
-  else
-    CT_GW=""
   fi
 
-  # Root-Passwort
+  # Passwort
   echo ""
   ask "Root-Passwort für den Container:"
   read -rs CT_PASSWORD
   echo ""
-  [[ -z "$CT_PASSWORD" ]] && error "Passwort darf nicht leer sein."
+  if [[ -z "$CT_PASSWORD" ]]; then
+    error "Passwort darf nicht leer sein."
+  fi
   ask "Passwort wiederholen:"
   read -rs CT_PASSWORD_CONFIRM
   echo ""
-  [[ "$CT_PASSWORD" != "$CT_PASSWORD_CONFIRM" ]] && error "Passwörter stimmen nicht überein."
+  if [[ "$CT_PASSWORD" != "$CT_PASSWORD_CONFIRM" ]]; then
+    error "Passwörter stimmen nicht überein."
+  fi
 
-  # SSH-Key (optional)
+  # SSH-Key
   echo ""
   ask "Pfad zu SSH Public Key (leer = überspringen):"
   read -r input_sshkey
@@ -215,7 +217,7 @@ collect_config() {
 }
 
 # -----------------------------------------------------------------------------
-# Zusammenfassung bestätigen
+# Zusammenfassung
 # -----------------------------------------------------------------------------
 confirm_config() {
   section "Zusammenfassung"
@@ -229,20 +231,27 @@ confirm_config() {
   echo -e "  Disk:            ${CT_DISK} GB (${CT_STORAGE})"
   echo -e "  Bridge:          ${CT_BRIDGE}"
   echo -e "  IP:              ${CT_IP}"
-  [[ -n "${CT_GW:-}" ]] && echo -e "  Gateway:         ${CT_GW}"
+  if [[ -n "$CT_GW" ]]; then
+    echo -e "  Gateway:         ${CT_GW}"
+  fi
   echo -e "  Template:        ${DEBIAN_TEMPLATE} (${TMPL_STORAGE})"
-  [[ -n "${CT_SSHKEY:-}" ]] && echo -e "  SSH-Key:         ${CT_SSHKEY}"
+  if [[ -n "$CT_SSHKEY" ]]; then
+    echo -e "  SSH-Key:         ${CT_SSHKEY}"
+  fi
   echo -e "  Auto-Install:    ${AUTO_INSTALL}"
   echo ""
 
   ask "Alles korrekt? Container erstellen? [J/n]:"
   read -r confirm
   confirm="${confirm:-j}"
-  [[ "$confirm" =~ ^[jJyY]$ ]] || { info "Abgebrochen."; exit 0; }
+  if [[ ! "$confirm" =~ ^[jJyY]$ ]]; then
+    info "Abgebrochen."
+    exit 0
+  fi
 }
 
 # -----------------------------------------------------------------------------
-# Debian-Template herunterladen (falls nicht vorhanden)
+# Template herunterladen
 # -----------------------------------------------------------------------------
 download_template() {
   section "Debian 13 Template"
@@ -255,83 +264,85 @@ download_template() {
   info "Aktualisiere Template-Liste..."
   pveam update || warn "pveam update fehlgeschlagen – versuche trotzdem den Download."
 
-  info "Lade herunter: ${DEBIAN_TEMPLATE} (kann einige Minuten dauern)..."
-  pveam download "${TMPL_STORAGE}" "${DEBIAN_TEMPLATE}" \
-    || error "Template-Download fehlgeschlagen.\n  Manuell: pveam download ${TMPL_STORAGE} ${DEBIAN_TEMPLATE}"
+  info "Lade herunter: ${DEBIAN_TEMPLATE}..."
+  if ! pveam download "${TMPL_STORAGE}" "${DEBIAN_TEMPLATE}"; then
+    error "Template-Download fehlgeschlagen.\nManuell: pveam download ${TMPL_STORAGE} ${DEBIAN_TEMPLATE}"
+  fi
 
   log "Template heruntergeladen."
 }
 
 # -----------------------------------------------------------------------------
-# LXC Container erstellen
+# Container erstellen
 # -----------------------------------------------------------------------------
 create_container() {
   section "LXC Container erstellen (ID: ${CTID})"
 
-  # Netzwerk-Konfiguration
   local net_config="name=eth0,bridge=${CT_BRIDGE}"
   if [[ "$CT_IP" == "dhcp" ]]; then
-    net_config+=",ip=dhcp"
+    net_config="${net_config},ip=dhcp"
   else
-    net_config+=",ip=${CT_IP}"
-    [[ -n "${CT_GW:-}" ]] && net_config+=",gw=${CT_GW}"
-  fi
-
-  # pct create aufbauen
-  local create_cmd=(
-    pct create "${CTID}"
-    "${TMPL_STORAGE}:vztmpl/${DEBIAN_TEMPLATE}"
-    --hostname    "${CT_HOSTNAME}"
-    --password    "${CT_PASSWORD}"
-    --cores       "${CT_CORES}"
-    --memory      "${CT_MEMORY}"
-    --swap        "${CT_SWAP}"
-    --rootfs      "${CT_STORAGE}:${CT_DISK}"
-    --net0        "${net_config}"
-    --nameserver  "8.8.8.8 8.8.4.4"
-    --searchdomain "local"
-    --ostype      debian
-    --unprivileged 1
-    --features    "nesting=1"
-    --start       0
-    --onboot      1
-  )
-
-  if [[ -n "${CT_SSHKEY:-}" && -f "${CT_SSHKEY}" ]]; then
-    create_cmd+=(--ssh-public-keys "${CT_SSHKEY}")
-    info "SSH-Key wird eingebunden: ${CT_SSHKEY}"
+    net_config="${net_config},ip=${CT_IP}"
+    if [[ -n "$CT_GW" ]]; then
+      net_config="${net_config},gw=${CT_GW}"
+    fi
   fi
 
   info "Führe pct create aus..."
-  "${create_cmd[@]}" || error "pct create fehlgeschlagen."
+
+  local ssh_args=()
+  if [[ -n "$CT_SSHKEY" ]] && [[ -f "$CT_SSHKEY" ]]; then
+    ssh_args=(--ssh-public-keys "$CT_SSHKEY")
+    info "SSH-Key wird eingebunden: ${CT_SSHKEY}"
+  fi
+
+  if ! pct create "${CTID}" \
+      "${TMPL_STORAGE}:vztmpl/${DEBIAN_TEMPLATE}" \
+      --hostname    "${CT_HOSTNAME}" \
+      --password    "${CT_PASSWORD}" \
+      --cores       "${CT_CORES}" \
+      --memory      "${CT_MEMORY}" \
+      --swap        "${CT_SWAP}" \
+      --rootfs      "${CT_STORAGE}:${CT_DISK}" \
+      --net0        "${net_config}" \
+      --nameserver  "8.8.8.8 8.8.4.4" \
+      --searchdomain "local" \
+      --ostype      debian \
+      --unprivileged 1 \
+      --features    "nesting=1" \
+      --start       0 \
+      --onboot      1 \
+      "${ssh_args[@]}"; then
+    error "pct create fehlgeschlagen."
+  fi
+
   log "Container ${CTID} erstellt."
 
-  # /dev/net/tun für Multicast RTP
   setup_tun_device
 
-  # Container starten
   info "Container wird gestartet..."
-  pct start "${CTID}" || error "Container konnte nicht gestartet werden."
+  if ! pct start "${CTID}"; then
+    error "Container konnte nicht gestartet werden."
+  fi
   sleep 6
   log "Container ${CTID} läuft."
 }
 
 # -----------------------------------------------------------------------------
-# /dev/net/tun für Multicast RTP Streaming
+# /dev/net/tun
 # -----------------------------------------------------------------------------
 setup_tun_device() {
   section "Netzwerk-Feature: /dev/net/tun (Multicast RTP)"
 
   local conf_file="/etc/pve/lxc/${CTID}.conf"
+  cat >> "$conf_file" <<'EOF'
 
-  cat >> "$conf_file" <<EOF
-
-# tts-alarmserver: TUN-Device für Multicast RTP-Streaming
+# tts-alarmserver: TUN-Device fuer Multicast RTP-Streaming
 lxc.cgroup2.devices.allow: c 10:200 rwm
 lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
 EOF
 
-  log "/dev/net/tun konfiguriert → Multicast 239.x.x.x wird unterstützt."
+  log "/dev/net/tun konfiguriert → Multicast 239.x.x.x unterstützt."
 }
 
 # -----------------------------------------------------------------------------
@@ -341,27 +352,28 @@ setup_container() {
   section "Container-Grundkonfiguration"
 
   info "Paketlisten aktualisieren..."
-  pct exec "${CTID}" -- bash -c "apt-get update -qq && apt-get install -y -qq curl wget ca-certificates" \
-    || error "apt-get im Container fehlgeschlagen."
+  if ! pct exec "${CTID}" -- bash -c "apt-get update -qq && apt-get install -y -qq curl wget ca-certificates"; then
+    error "apt-get im Container fehlgeschlagen."
+  fi
   log "Basis-Pakete installiert."
 
   info "Zeitzone: Europe/Berlin..."
   pct exec "${CTID}" -- bash -c \
     "ln -sf /usr/share/zoneinfo/Europe/Berlin /etc/localtime && \
      echo 'Europe/Berlin' > /etc/timezone && \
-     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tzdata 2>/dev/null || true"
+     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tzdata 2>/dev/null; true"
   log "Zeitzone gesetzt."
 
   info "Locale: de_DE.UTF-8..."
   pct exec "${CTID}" -- bash -c \
-    "sed -i 's/# de_DE.UTF-8/de_DE.UTF-8/' /etc/locale.gen 2>/dev/null || true; \
-     locale-gen 2>/dev/null || true; \
-     update-locale LANG=de_DE.UTF-8 2>/dev/null || true"
+    "sed -i 's/# de_DE.UTF-8/de_DE.UTF-8/' /etc/locale.gen 2>/dev/null; \
+     locale-gen 2>/dev/null; \
+     update-locale LANG=de_DE.UTF-8 2>/dev/null; true"
   log "Locale gesetzt."
 }
 
 # -----------------------------------------------------------------------------
-# install.sh im Container ausführen
+# install.sh ausführen
 # -----------------------------------------------------------------------------
 run_installer() {
   if [[ ! "$AUTO_INSTALL" =~ ^[jJyY]$ ]]; then
@@ -369,44 +381,48 @@ run_installer() {
     return 0
   fi
 
-  section "tts-alarmserver Installation im Container"
+  section "tts-alarmserver Installation"
 
   info "Lade install.sh von GitHub..."
-  pct exec "${CTID}" -- bash -c \
-    "curl -fsSL '${INSTALL_SCRIPT_URL}' -o /tmp/install.sh && chmod +x /tmp/install.sh" \
-    || error "install.sh konnte nicht heruntergeladen werden."
+  if ! pct exec "${CTID}" -- bash -c \
+      "curl -fsSL '${INSTALL_SCRIPT_URL}' -o /tmp/install.sh && chmod +x /tmp/install.sh"; then
+    error "install.sh konnte nicht heruntergeladen werden."
+  fi
 
-  info "Starte install.sh (5–15 Minuten je nach Verbindung)..."
+  info "Starte install.sh (5–15 Minuten)..."
   echo "──────────────────────────────────────────────────────"
   pct exec "${CTID}" -- bash /tmp/install.sh
   echo "──────────────────────────────────────────────────────"
   log "Installation abgeschlossen."
 
   info "Service starten..."
-  pct exec "${CTID}" -- bash -c "systemctl start tts-alarmserver && sleep 3" || true
+  pct exec "${CTID}" -- bash -c "systemctl start tts-alarmserver; sleep 3" || true
 
   local health
   health=$(pct exec "${CTID}" -- bash -c \
     "curl -sf http://localhost:3000/health 2>/dev/null || echo '{\"ok\":false}'" 2>/dev/null) || health='{"ok":false}'
+
   if echo "$health" | grep -q '"ok":true'; then
     log "Health-Check: ✓ Server antwortet."
   else
-    warn "Health-Check fehlgeschlagen – bitte manuell prüfen:"
+    warn "Health-Check fehlgeschlagen – manuell prüfen:"
     warn "  pct enter ${CTID}"
     warn "  systemctl status tts-alarmserver"
   fi
 }
 
 # -----------------------------------------------------------------------------
-# Abschluss-Zusammenfassung
+# Abschluss
 # -----------------------------------------------------------------------------
 print_summary() {
-  local ct_ip_display="$CT_IP"
+  local ct_ip_display
+  ct_ip_display="$CT_IP"
+
   if [[ "$CT_IP" == "dhcp" ]]; then
     sleep 2
-    ct_ip_display=$(pct exec "${CTID}" -- bash -c \
-      "hostname -I 2>/dev/null | awk '{print \$1}'" 2>/dev/null) || ct_ip_display="(IP via: pct exec ${CTID} -- hostname -I)"
-    ct_ip_display="${ct_ip_display:-DHCP – IP noch nicht vergeben}"
+    local detected
+    detected=$(pct exec "${CTID}" -- bash -c "hostname -I 2>/dev/null | awk '{print \$1}'" 2>/dev/null) || true
+    ct_ip_display="${detected:-DHCP – IP via: pct exec ${CTID} -- hostname -I}"
   else
     ct_ip_display=$(echo "$CT_IP" | cut -d'/' -f1)
   fi
@@ -416,15 +432,12 @@ print_summary() {
   echo -e "${BOLD}${GREEN}║     LXC Container erfolgreich erstellt & konfiguriert     ║${NC}"
   echo -e "${BOLD}${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "  ${BOLD}Container ID:${NC}    ${CTID}"
-  echo -e "  ${BOLD}Hostname:${NC}        ${CT_HOSTNAME}"
-  echo -e "  ${BOLD}IP-Adresse:${NC}      ${ct_ip_display}"
+  echo -e "  ${BOLD}Container ID:${NC}  ${CTID}"
+  echo -e "  ${BOLD}Hostname:${NC}      ${CT_HOSTNAME}"
+  echo -e "  ${BOLD}IP-Adresse:${NC}    ${ct_ip_display}"
   echo ""
-  echo -e "  ${BOLD}Konsole öffnen:${NC}"
-  echo -e "    ${CYAN}pct enter ${CTID}${NC}"
-  echo ""
-  echo -e "  ${BOLD}SSH-Zugang:${NC}"
-  echo -e "    ${CYAN}ssh root@${ct_ip_display}${NC}"
+  echo -e "  ${BOLD}Konsole:${NC}  ${CYAN}pct enter ${CTID}${NC}"
+  echo -e "  ${BOLD}SSH:${NC}      ${CYAN}ssh root@${ct_ip_display}${NC}"
   echo ""
 
   if [[ "$AUTO_INSTALL" =~ ^[jJyY]$ ]]; then
@@ -439,10 +452,7 @@ print_summary() {
     echo -e "    ${CYAN}      -H 'Content-Type: application/json' \\${NC}"
     echo -e "    ${CYAN}      -d '{\"text\":\"B2Y Musterstraße fünf\",\"priority\":1}'${NC}"
     echo ""
-    echo -e "  ${BOLD}Updates einspielen:${NC}"
-    echo -e "    ${CYAN}pct exec ${CTID} -- tts-alarmserver-update${NC}"
-    echo ""
-    echo -e "  ${YELLOW}⚠  RTP_HOST in /tts-alarmserver/.env auf Ziel-Multicast-IP anpassen!${NC}"
+    echo -e "  ${YELLOW}⚠  RTP_HOST in /tts-alarmserver/.env anpassen!${NC}"
     echo -e "  ${YELLOW}⚠  API_KEY in /tts-alarmserver/.env für Produktion setzen!${NC}"
   else
     echo -e "  ${BOLD}Installation starten:${NC}"
@@ -451,11 +461,11 @@ print_summary() {
   fi
 
   echo ""
-  echo -e "  ${BOLD}Container-Verwaltung (auf PVE-Host):${NC}"
-  echo -e "    ${CYAN}pct stop    ${CTID}${NC}   # stoppen"
-  echo -e "    ${CYAN}pct start   ${CTID}${NC}   # starten"
-  echo -e "    ${CYAN}pct restart ${CTID}${NC}   # neu starten"
-  echo -e "    ${CYAN}pct destroy ${CTID}${NC}   # löschen"
+  echo -e "  ${BOLD}Verwaltung:${NC}"
+  echo -e "    ${CYAN}pct stop    ${CTID}${NC}"
+  echo -e "    ${CYAN}pct start   ${CTID}${NC}"
+  echo -e "    ${CYAN}pct restart ${CTID}${NC}"
+  echo -e "    ${CYAN}pct destroy ${CTID}${NC}"
   echo ""
 }
 
