@@ -40,6 +40,8 @@ ESPEAK_DATA_PATH="/opt/piper"
 VOICE_NAME="de_DE-thorsten-high"
 VOICE_QUALITY="high"                      # low | medium | high
 VOICE_URL_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/${VOICE_QUALITY}"
+APP_DIR="/opt/tts-alarmserver"
+VOICES_DIR="${APP_DIR}/voices"
 
 # Farben
 RED='\033[0;31m'
