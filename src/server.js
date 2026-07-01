@@ -9,14 +9,14 @@
 
 require('dotenv').config();
 
-const http = require('http');
-const { createApp } = require('./app');
-const config = require('./config');
-const logger = require('./utils/logger');
-const { initWebSocket } = require('./services/websocketService');
-const { QueueService } = require('./services/queueService');
-const { AlarmService } = require('./services/alarmService');
-const eventBus = require('./events/eventBus');
+const http       = require('http');
+const { createApp }        = require('./app');
+const config               = require('./config');
+const logger               = require('./utils/logger');
+const { initWebSocket }    = require('./services/websocketService');
+const { QueueService }     = require('./services/queueService');
+const { AlarmService }     = require('./services/alarmService');
+const eventBus             = require('./events/eventBus');
 
 let server = null;
 
@@ -25,6 +25,9 @@ let server = null;
  */
 async function start() {
   try {
+    // Konfiguration validieren – wirft bei fehlenden Pflichtfeldern
+    config.validate();
+
     logger.info('TTS-Alarmserver wird gestartet...', {
       version: process.env.npm_package_version || '1.0.0',
       nodeEnv: config.server.nodeEnv,
@@ -61,14 +64,17 @@ async function start() {
     });
 
     const addr = server.address();
+    const displayHost = config.server.host === '0.0.0.0' ? 'localhost' : config.server.host;
+
     logger.info('TTS-Alarmserver läuft', {
-      host: config.server.host,
-      port: addr.port,
-      dashboard: `http://${config.server.host === '0.0.0.0' ? 'localhost' : config.server.host}:${addr.port}/dashboard`,
-      pid: process.pid,
+      host:      config.server.host,
+      port:      addr.port,
+      dashboard: `http://${displayHost}:${addr.port}/dashboard`,
+      pid:       process.pid,
     });
 
     eventBus.emit('server.started', { port: addr.port });
+
   } catch (err) {
     logger.error('Fehler beim Starten des Servers', { error: err.message, stack: err.stack });
     process.exit(1);
@@ -115,7 +121,7 @@ async function shutdown(signal) {
 
 // Signal-Handler für Graceful Shutdown
 process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGINT',  () => shutdown('SIGINT'));
 
 // Unbehandelte Fehler abfangen
 process.on('uncaughtException', (err) => {
