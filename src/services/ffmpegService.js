@@ -108,6 +108,8 @@ class FFmpegService {
 
   /**
    * Führt FFmpeg mit Stream-Timeout aus.
+   * Delegiert ausschließlich an _spawnFfmpeg(), welches { promise, kill } liefert.
+   *
    * @param {string[]} args
    * @param {string}   rtpUrl
    * @param {string}   alarmId
@@ -115,30 +117,27 @@ class FFmpegService {
    */
   async _runFfmpegWithTimeout(args, rtpUrl, alarmId) {
     const timeoutMs  = config.rtp.timeoutSec * 1_000;
-    let   timeoutRef = null;
-    let   proc       = null;
+    const procHandle = this._spawnFfmpeg(args, rtpUrl, alarmId);
 
-    const ffmpegPromise = this._runFfmpeg(args, rtpUrl).then((p) => { proc = p; });
-
-    // Da _runFfmpeg intern spawn verwendet und das proc-Objekt zurückgeben
-    // müsste, vereinfachen wir: Race gegen separaten Timer mit Kill.
-    const runPromise = new Promise((resolve, reject) => {
-      const procPromise = this._spawnFfmpeg(args, rtpUrl, alarmId);
-
-      timeoutRef = setTimeout(() => {
-        procPromise.kill && procPromise.kill();
+    return new Promise((resolve, reject) => {
+      const timeoutRef = setTimeout(() => {
+        procHandle.kill();
         reject(new AppError(
           `FFmpeg Stream-Timeout nach ${config.rtp.timeoutSec}s`,
           { code: 'FFMPEG_TIMEOUT', statusCode: 500 }
         ));
       }, timeoutMs);
 
-      procPromise.promise
-        .then(() => { clearTimeout(timeoutRef); resolve(); })
-        .catch((err) => { clearTimeout(timeoutRef); reject(err); });
+      procHandle.promise
+        .then(() => {
+          clearTimeout(timeoutRef);
+          resolve();
+        })
+        .catch((err) => {
+          clearTimeout(timeoutRef);
+          reject(err);
+        });
     });
-
-    return runPromise;
   }
 
   /**
