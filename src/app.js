@@ -15,7 +15,7 @@
  *   5.  Sanitize             – nach Body-Parser, vor RequestId
  *   6.  RequestId            – UUID pro Request, Header-Propagation
  *   7.  RequestLogger        – strukturiertes HTTP-Logging
- *   8.  Global Rate-Limiter  – Schutz aller Endpunkte
+ *   8.  Global Rate-Limiter  – Schutz aller Endpunkte (außer /ws und /health)
  *   9.  Static Files         – Dashboard
  *  10.  Routes               – mit route-spezifischen Limitern und Auth
  *  11.  404 Handler
@@ -105,8 +105,14 @@ function createApp() {
   app.use(requestLogger);
 
   // --- 8. Globaler Rate-Limiter ---
-  // Gilt für alle Endpunkte (Health ist intern ausgenommen).
-  app.use(globalLimiter);
+  // Gilt für alle Endpunkte außer /ws (WebSocket-Upgrade) und /health.
+  // WebSocket-Upgrades sind keine normalen HTTP-Requests und dürfen nicht
+  // durch den Rate-Limiter blockiert werden – das würde den Dashboard-
+  // Live-Status dauerhaft auf "Offline" halten.
+  app.use((req, res, next) => {
+    if (req.path === '/ws' || req.path.startsWith('/health')) return next();
+    return globalLimiter(req, res, next);
+  });
 
   // --- 9. Statische Dateien (Dashboard) ---
   app.use(
@@ -169,6 +175,7 @@ function createApp() {
       'GET  /voices',
       'POST /voice',
       'GET  /dashboard',
+      'WS   /ws',
     ],
   });
 
