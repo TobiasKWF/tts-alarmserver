@@ -2,111 +2,175 @@
 
 /**
  * @file services/ffmpegService.js
- * @description FFmpeg-Wrapper für RTP-Audio-Streaming.
- * Streamt WAV-Dateien via ffmpeg als RTP-Multicast oder Unicast.
- * Emittiert stream.started, stream.finished, stream.failed Events.
+ * @description FFmpeg-Service für RTP-Audio-Streaming.
+ *
+ * Streamt WAV-Audiodateien per RTP an eine Multicast- oder Unicast-Adresse.
+ * Unterstützt optionales Voranstellen einer Gong-Datei (concat).
+ *
+ * FFmpeg-Aufruf (ohne Gong):
+ *   ffmpeg -i <audioFile> -acodec <codec> -b:a <bitrate> -ar <sampleRate>
+ *          -f rtp "rtp://<host>:<port>?ttl=<ttl>"
+ *
+ * FFmpeg-Aufruf (mit Gong, concat filter):
+ *   ffmpeg -i <gongFile> -i <audioFile>
+ *          -filter_complex "[0:a][1:a]concat=n=2:v=0:a=1[aout]"
+ *          -map "[aout]" -acodec <codec> ...
  */
 
 const { spawn } = require('child_process');
-const fs = require('fs');
-
-const logger = require('../utils/logger').child({ service: 'FFmpegService' });
-const eventBus = require('../events/eventBus');
 const config = require('../config');
-const { StreamError } = require('../errors');
+const logger = require('../utils/logger').child({ service: 'FFmpegService' });
 
-/**
- * Streamt eine Audio-Datei via RTP.
- * @param {object} params
- * @param {string} params.inputFile - Absoluter Pfad zur Eingabedatei (WAV)
- * @param {string} [params.rtpHost] - RTP-Zieladresse (Multicast oder Unicast)
- * @param {number} [params.rtpPort] - RTP-Port
- * @param {string} [params.bitrate] - Audio-Bitrate (z.B. '128k')
- * @param {string} [params.codec] - Audio-Codec (z.B. 'libopus', 'pcm_alaw')
- * @param {number} [params.ttl] - Multicast TTL
- * @param {string} [params.requestId] - Tracing-ID
- * @returns {Promise<void>}
- * @throws {StreamError}
- */
-async function streamRtp({
-  inputFile,
-  rtpHost,
-  rtpPort,
-  bitrate,
-  codec,
-  ttl,
-  requestId,
-}) {
-  const resolvedHost = rtpHost || config.rtp.host;
-  const resolvedPort = rtpPort || config.rtp.port;
-  const resolvedBitrate = bitrate || config.rtp.bitrate;
-  const resolvedCodec = codec || config.rtp.codec;
-  const resolvedTtl = ttl !== undefined ? ttl : config.rtp.ttl;
-  const rtpUrl = `rtp://${resolvedHost}:${resolvedPort}?ttl=${resolvedTtl}`;
+/** @type {FFmpegService|null} */
+let instance = null;
 
-  if (!fs.existsSync(inputFile)) {
-    throw new StreamError(`Eingabedatei nicht gefunden: ${inputFile}`, { inputFile });
+class FFmpegService {
+  constructor() {
+    this._ffmpegBin = process.env.FFMPEG_BINARY || 'ffmpeg';
   }
 
-  logger.debug('FFmpeg RTP-Stream starten', {
-    inputFile,
-    rtpUrl,
-    codec: resolvedCodec,
-    bitrate: resolvedBitrate,
-    requestId,
-  });
+  /**
+   * Gibt die Singleton-Instanz zurück.
+   * @returns {FFmpegService}
+   */
+  static getInstance() {
+    if (!instance) instance = new FFmpegService();
+    return instance;
+  }
 
-  eventBus.emit('stream.started', { rtpUrl, codec: resolvedCodec, requestId });
+  /**
+   * Streamt eine Audio-Datei (mit optionalem Gong davor) per RTP.
+   *
+   * @param {object} opts
+   * @param {string}      opts.audioFile   - Absoluter Pfad zur WAV-Datei
+   * @param {string|null} opts.gongFile    - Absoluter Pfad zur Gong-WAV (oder null)
+   * @param {string}      opts.rtpHost     - RTP-Zieladresse
+   * @param {number}      opts.rtpPort     - RTP-Zielport
+   * @param {string}      [opts.codec]     - FFmpeg-Audio-Codec
+   * @param {string}      [opts.bitrate]   - Audio-Bitrate
+   * @param {number}      [opts.volume]    - Lautstärke in Prozent (0–100)
+   * @returns {Promise<void>}
+   * @throws {FFmpegError} Bei FFmpeg-Fehler
+   */
+  async streamToRtp({
+    audioFile,
+    gongFile = null,
+    rtpHost,
+    rtpPort,
+    codec = config.rtp.codec,
+    bitrate = config.rtp.bitrate,
+    volume = config.piper.volume,
+  }) {
+    const rtpUrl = `rtp://${rtpHost}:${rtpPort}?ttl=${config.rtp.ttl}`;
+    const sampleRate = config.rtp.sampleRate;
 
-  return new Promise((resolve, reject) => {
-    const args = [
-      '-y',                          // Überschreiben ohne Nachfrage
-      '-hide_banner',
-      '-loglevel', 'error',
-      '-i', inputFile,               // Eingabedatei
-      '-acodec', resolvedCodec,      // Audio-Codec
-      '-b:a', resolvedBitrate,       // Bitrate
-      '-ar', String(config.rtp.sampleRate), // Sample-Rate
-      '-f', 'rtp',                   // RTP-Output-Format
+    const args = _buildFfmpegArgs({
+      audioFile,
+      gongFile,
       rtpUrl,
-    ];
-
-    const ffmpeg = spawn('ffmpeg', args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      codec,
+      bitrate,
+      sampleRate,
+      volume,
     });
 
-    let stderrOutput = '';
-    let stdoutOutput = '';
+    logger.debug('FFmpeg RTP-Stream gestartet', { rtpUrl, codec, bitrate, gongFile: !!gongFile });
 
-    ffmpeg.stdout.on('data', (data) => { stdoutOutput += data.toString(); });
-    ffmpeg.stderr.on('data', (data) => { stderrOutput += data.toString(); });
+    await this._runFfmpeg(args, rtpUrl);
 
-    ffmpeg.on('error', (err) => {
-      const errMsg = `FFmpeg konnte nicht gestartet werden: ${err.message}`;
-      logger.error(errMsg, { error: err.message, requestId });
-      eventBus.emit('stream.failed', { error: errMsg, requestId });
-      reject(new StreamError(errMsg, { error: err.message }));
+    logger.debug('FFmpeg RTP-Stream abgeschlossen', { rtpUrl });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Führt den FFmpeg-Prozess aus und wartet auf Beendigung.
+   * @param {string[]} args
+   * @param {string}   rtpUrl   (für Logging)
+   * @returns {Promise<void>}
+   */
+  _runFfmpeg(args, rtpUrl) {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(this._ffmpegBin, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let stderr = '';
+
+      proc.stderr.on('data', (chunk) => {
+        const line = chunk.toString();
+        stderr += line;
+        // FFmpeg schreibt Progress auf stderr – nur echte Fehler weiterloggen
+        if (line.toLowerCase().includes('error') || line.toLowerCase().includes('invalid')) {
+          logger.warn('FFmpeg stderr', { line: line.trim(), rtpUrl });
+        }
+      });
+
+      proc.on('error', (err) => {
+        reject(Object.assign(
+          new Error(`FFmpeg konnte nicht gestartet werden: ${err.message}`),
+          { code: 'FFMPEG_SPAWN_ERROR', cause: err }
+        ));
+      });
+
+      proc.on('close', (code) => {
+        if (code !== 0 && code !== null) {
+          reject(Object.assign(
+            new Error(`FFmpeg beendet mit Exit-Code ${code}: ${stderr.slice(0, 500)}`),
+            { code: 'FFMPEG_EXIT_ERROR', exitCode: code, stderr }
+          ));
+          return;
+        }
+        resolve();
+      });
     });
-
-    ffmpeg.on('close', (code) => {
-      if (code !== 0) {
-        const errMsg = `FFmpeg beendet mit Code ${code}`;
-        logger.error(errMsg, {
-          code,
-          stderr: stderrOutput.trim(),
-          rtpUrl,
-          requestId,
-        });
-        eventBus.emit('stream.failed', { error: errMsg, code, requestId });
-        reject(new StreamError(errMsg, { exitCode: code, stderr: stderrOutput.trim() }));
-        return;
-      }
-
-      logger.debug('FFmpeg RTP-Stream abgeschlossen', { rtpUrl, requestId });
-      eventBus.emit('stream.finished', { rtpUrl, requestId });
-      resolve();
-    });
-  });
+  }
 }
 
-module.exports = { streamRtp };
+// ---------------------------------------------------------------------------
+// Helfer
+// ---------------------------------------------------------------------------
+
+/**
+ * Baut die FFmpeg-Argumente für den RTP-Stream auf.
+ * Mit Gong wird ein concat-Filter verwendet.
+ *
+ * @param {object} opts
+ * @returns {string[]}
+ */
+function _buildFfmpegArgs({ audioFile, gongFile, rtpUrl, codec, bitrate, sampleRate, volume }) {
+  const volumeFilter = `volume=${volume / 100}`;
+
+  if (gongFile) {
+    // Gong + TTS-Audio zusammenfügen
+    return [
+      '-y',
+      '-i', gongFile,
+      '-i', audioFile,
+      '-filter_complex',
+      `[0:a]${volumeFilter}[g];[1:a]${volumeFilter}[a];[g][a]concat=n=2:v=0:a=1[aout]`,
+      '-map', '[aout]',
+      '-acodec', codec,
+      '-b:a', bitrate,
+      '-ar', String(sampleRate),
+      '-f', 'rtp',
+      rtpUrl,
+    ];
+  }
+
+  // Nur TTS-Audio
+  return [
+    '-y',
+    '-i', audioFile,
+    '-af', volumeFilter,
+    '-acodec', codec,
+    '-b:a', bitrate,
+    '-ar', String(sampleRate),
+    '-f', 'rtp',
+    rtpUrl,
+  ];
+}
+
+module.exports = { FFmpegService };

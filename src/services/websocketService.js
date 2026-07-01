@@ -2,181 +2,196 @@
 
 /**
  * @file services/websocketService.js
- * @description WebSocket-Service für Live-Dashboard-Updates.
- * Reagiert ausschließlich auf Events des Event-Bus und broadcastet
- * diese an alle verbundenen Dashboard-Clients.
- * Kennt weder Routes noch AlarmService direkt.
+ * @description WebSocket-Service für das Live-Dashboard.
+ *
+ * Bindet sich an den HTTP-Server und leitet alle relevanten EventBus-Events
+ * als JSON-Nachrichten an verbundene Dashboard-Clients weiter.
+ * Sendet außerdem einen initialen State-Snapshot beim Connect.
  */
 
 const { WebSocketServer } = require('ws');
+const config = require('../config');
 const logger = require('../utils/logger').child({ service: 'WebSocketService' });
 const eventBus = require('../events/eventBus');
-const config = require('../config');
-const HistoryService = require('./historyService');
-const { QueueService } = require('./queueService');
 
 /** @type {WebSocketServer|null} */
 let wss = null;
 
-/** @type {Set<import('ws').WebSocket>} */
-const clients = new Set();
+/**
+ * Events die an Dashboard-Clients weitergeleitet werden.
+ * @type {string[]}
+ */
+const BROADCAST_EVENTS = [
+  'alarm.received',
+  'alarm.started',
+  'alarm.finished',
+  'alarm.failed',
+  'tts.started',
+  'tts.finished',
+  'tts.failed',
+  'stream.started',
+  'stream.finished',
+  'stream.failed',
+  'queue.changed',
+  'queue.empty',
+  'server.started',
+  'server.stopping',
+];
 
 /**
- * Initialisiert den WebSocket-Server gebunden an den HTTP-Server.
+ * Initialisiert den WebSocket-Server und bindet ihn an den HTTP-Server.
  * @param {import('http').Server} httpServer
  */
 function initWebSocket(httpServer) {
   wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
+  logger.info('WebSocket-Server initialisiert', { path: '/ws' });
+
+  // Alle konfigurierten Events auf den EventBus hören und an Clients senden
+  BROADCAST_EVENTS.forEach((eventName) => {
+    eventBus.on(eventName, (data) => {
+      _broadcast({ type: eventName, ...data });
+    });
+  });
+
+  // Ping-Pong Keepalive
+  const pingInterval = setInterval(() => {
+    if (!wss) return;
+    wss.clients.forEach((client) => {
+      if (client.readyState !== client.OPEN) return;
+      if (client._isAlive === false) {
+        logger.debug('WebSocket-Client wegen fehlender Pong-Antwort getrennt');
+        client.terminate();
+        return;
+      }
+      client._isAlive = false;
+      client.ping();
+    });
+  }, config.websocket.pingIntervalMs);
+
   wss.on('connection', (ws, req) => {
-    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-    clients.add(ws);
+    ws._isAlive = true;
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
 
     logger.info('WebSocket-Client verbunden', {
-      ip: clientIp,
-      totalClients: clients.size,
+      clientIp,
+      totalClients: wss.clients.size,
     });
 
-    // Initial-State sofort senden
-    _sendToClient(ws, {
-      type: 'init',
-      payload: {
-        status: 'online',
-        queue: QueueService.getInstance()._getPublicQueue(),
-        history: HistoryService.getAll(),
-        stats: HistoryService.getStats(),
-        serverTime: new Date().toISOString(),
-      },
+    ws.on('pong', () => {
+      ws._isAlive = true;
     });
 
-    ws.on('message', (raw) => {
-      // Derzeit keine Client→Server-Nachrichten benötigt
-      logger.debug('WebSocket-Nachricht empfangen (ignoriert)', { raw: String(raw) });
-    });
-
-    ws.on('close', () => {
-      clients.delete(ws);
-      logger.info('WebSocket-Client getrennt', { totalClients: clients.size });
+    ws.on('message', (rawData) => {
+      // Dashboard sendet bisher keine Befehle – ignorieren, nur loggen
+      logger.debug('WebSocket-Nachricht empfangen (ignoriert)', {
+        clientIp,
+        data: rawData.toString().slice(0, 100),
+      });
     });
 
     ws.on('error', (err) => {
-      clients.delete(ws);
-      logger.warn('WebSocket-Client Fehler', { error: err.message });
+      logger.warn('WebSocket-Fehler', { clientIp, error: err.message });
     });
-  });
 
-  // Ping-Interval um tote Verbindungen zu erkennen
-  const pingInterval = setInterval(() => {
-    for (const ws of clients) {
-      if (ws.readyState !== ws.OPEN) {
-        clients.delete(ws);
-        continue;
-      }
-      ws.ping();
-    }
-  }, config.websocket.pingIntervalMs);
-
-  wss.on('close', () => clearInterval(pingInterval));
-
-  // Event-Bus-Listener registrieren
-  _registerEventListeners();
-
-  logger.info('WebSocket-Server initialisiert', { path: '/ws' });
-}
-
-/**
- * Registriert alle Event-Bus-Listener.
- * Dashboard und Logger reagieren ausschließlich auf diese Events.
- */
-function _registerEventListeners() {
-  eventBus.on('alarm.received', (data) => {
-    _broadcast({ type: 'alarm.received', payload: data });
-  });
-
-  eventBus.on('alarm.started', (data) => {
-    _broadcast({ type: 'alarm.started', payload: data });
-  });
-
-  eventBus.on('alarm.finished', (data) => {
-    _broadcast({
-      type: 'alarm.finished',
-      payload: { ...data, history: HistoryService.getAll(), stats: HistoryService.getStats() },
-    });
-  });
-
-  eventBus.on('alarm.failed', (data) => {
-    _broadcast({
-      type: 'alarm.failed',
-      payload: { ...data, history: HistoryService.getAll() },
-    });
-  });
-
-  eventBus.on('queue.changed', (data) => {
-    _broadcast({ type: 'queue.changed', payload: data });
-  });
-
-  eventBus.on('queue.empty', (data) => {
-    _broadcast({ type: 'queue.empty', payload: data });
-  });
-
-  eventBus.on('tts.started', (data) => {
-    _broadcast({ type: 'tts.started', payload: data });
-  });
-
-  eventBus.on('tts.finished', (data) => {
-    _broadcast({ type: 'tts.finished', payload: data });
-  });
-
-  eventBus.on('stream.started', (data) => {
-    _broadcast({ type: 'stream.started', payload: data });
-  });
-
-  eventBus.on('stream.finished', (data) => {
-    _broadcast({ type: 'stream.finished', payload: data });
-  });
-
-  eventBus.on('server.stopping', (data) => {
-    _broadcast({ type: 'server.stopping', payload: data });
-  });
-}
-
-/**
- * Sendet eine Nachricht an alle verbundenen Clients.
- * @param {object} message
- */
-function _broadcast(message) {
-  if (clients.size === 0) return;
-  const payload = JSON.stringify(message);
-  for (const ws of clients) {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(payload, (err) => {
-        if (err) {
-          logger.warn('WebSocket-Broadcast fehlgeschlagen', { error: err.message });
-          clients.delete(ws);
-        }
+    ws.on('close', (code, reason) => {
+      logger.info('WebSocket-Client getrennt', {
+        clientIp,
+        code,
+        reason: reason.toString(),
+        remainingClients: wss ? wss.clients.size : 0,
       });
-    }
+    });
+
+    // Initialen Snapshot senden
+    _sendInitialState(ws);
+  });
+
+  wss.on('error', (err) => {
+    logger.error('WebSocket-Server-Fehler', { error: err.message });
+  });
+
+  wss.on('close', () => {
+    clearInterval(pingInterval);
+    logger.info('WebSocket-Server geschlossen');
+  });
+}
+
+/**
+ * Sendet einen initialen Snapshot an einen neu verbundenen Client.
+ * @param {import('ws').WebSocket} ws
+ */
+function _sendInitialState(ws) {
+  try {
+    const { QueueService } = require('./queueService');
+    const { AlarmService } = require('./alarmService');
+
+    const queueStats = QueueService.getInstance().getStats();
+    const alarmStats = AlarmService.getInstance().getStats();
+    const history = AlarmService.getInstance().getHistory(20);
+
+    _sendToClient(ws, {
+      type: 'snapshot',
+      server: {
+        version: process.env.npm_package_version || '1.0.0',
+        uptime: Math.floor(process.uptime()),
+        pid: process.pid,
+        nodeEnv: config.server.nodeEnv,
+      },
+      queue: queueStats,
+      alarm: alarmStats,
+      history,
+    });
+  } catch (err) {
+    logger.warn('Snapshot konnte nicht gesendet werden', { error: err.message });
   }
 }
 
 /**
- * Sendet eine Nachricht an einen einzelnen Client.
- * @param {import('ws').WebSocket} ws
- * @param {object} message
+ * Sendet eine Nachricht an alle verbundenen Dashboard-Clients.
+ * @param {object} data
  */
-function _sendToClient(ws, message) {
-  if (ws.readyState !== ws.OPEN) return;
-  ws.send(JSON.stringify(message), (err) => {
-    if (err) logger.warn('WebSocket-Send fehlgeschlagen', { error: err.message });
+function _broadcast(data) {
+  if (!wss || wss.clients.size === 0) return;
+
+  const payload = JSON.stringify(data);
+
+  wss.clients.forEach((client) => {
+    if (client.readyState === client.OPEN) {
+      _sendRaw(client, payload);
+    }
   });
 }
 
 /**
- * Gibt die Anzahl verbundener Clients zurück.
- * @returns {number}
+ * Sendet eine Nachricht an einen einzelnen Client (JSON serialisiert).
+ * @param {import('ws').WebSocket} ws
+ * @param {object} data
  */
-function getClientCount() {
-  return clients.size;
+function _sendToClient(ws, data) {
+  if (ws.readyState !== ws.OPEN) return;
+  _sendRaw(ws, JSON.stringify(data));
 }
 
-module.exports = { initWebSocket, getClientCount };
+/**
+ * Sendet rohen String an einen WebSocket-Client – fängt Fehler ab.
+ * @param {import('ws').WebSocket} ws
+ * @param {string} payload
+ */
+function _sendRaw(ws, payload) {
+  try {
+    ws.send(payload);
+  } catch (err) {
+    logger.debug('WebSocket send fehlgeschlagen', { error: err.message });
+  }
+}
+
+/**
+ * Gibt die aktuelle Anzahl verbundener Clients zurück.
+ * @returns {number}
+ */
+function getConnectedClients() {
+  return wss ? wss.clients.size : 0;
+}
+
+module.exports = { initWebSocket, getConnectedClients };

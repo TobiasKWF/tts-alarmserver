@@ -2,447 +2,270 @@
 
 /**
  * @file services/alarmService.js
- * @description Zentraler Alarm-Koordinator.
- * Empfängt Alarm-Payloads, startet die Audio-Pipeline und
- * kommuniziert Zustandsänderungen über den Event-Bus.
- * Kennt weder Routes noch WebSocket direkt – nur Events und Pipeline.
+ * @description Zentraler Alarm-Orchestrator.
+ *
+ * Verarbeitet einen Alarm aus der Queue:
+ *   1. Text normalisieren (Feuerwehr-Normalisierung)
+ *   2. TTS via Piper erzeugen → WAV-Datei in tmp/
+ *   3. Gong-Datei vorne einmischen (optional)
+ *   4. Per ffmpeg als RTP-Stream senden
+ *   5. Tmp-Datei aufräumen
+ *   6. Events auf dem EventBus emittieren
+ *
+ * Services kennen sich gegenseitig nicht – AlarmService delegiert
+ * an PiperService, MixerService und FFmpegService und koordiniert
+ * nur den Ablauf.
  */
 
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
 
+const config = require('../config');
 const logger = require('../utils/logger').child({ service: 'AlarmService' });
 const eventBus = require('../events/eventBus');
-const config = require('../config');
-const { PiperError, StreamError, ServiceUnavailableError } = require('../errors');
-const { sleep } = require('../utils/sleep');
-const { normalizeText } = require('../utils/normalize');
-const HistoryService = require('./historyService');
+const { normalizeText } = require('./normalizationService');
+const { PiperService } = require('./piperService');
+const { FFmpegService } = require('./ffmpegService');
 
-/**
- * @typedef {object} AlarmPayload
- * @property {string} id - Eindeutige Alarm-ID (UUID)
- * @property {string} text - Anzusagender Text (bereits aufbereitet oder roh)
- * @property {string} [voice] - Stimme (Dateiname ohne .onnx)
- * @property {number} [priority=5] - Priorität 1–10
- * @property {number} [speed] - Sprechgeschwindigkeit (überschreibt Konfiguration)
- * @property {number} [volume] - Lautstärke 0–100
- * @property {boolean} [gong=true] - Gong vor der Ansage abspielen
- * @property {boolean} [normalize=true] - Feuerwehr-Normalisierung anwenden
- * @property {string} [source='api'] - Quelle (api|divera|fanfare)
- * @property {string} [requestId] - HTTP-Request-ID zur Nachverfolgung
- */
+/** @type {AlarmService|null} */
+let instance = null;
+
+/** Alarmhistorie (in-memory, max HISTORY_MAX_ENTRIES Einträge) */
+const _history = [];
 
 class AlarmService {
-  /** @type {AlarmService|null} */
-  static #instance = null;
+  constructor() {
+    /** @type {QueueService|null} */
+    this._queueService = null;
 
-  /** @type {object|null} */
-  #queueService = null;
+    /** @type {PiperService} */
+    this._piperService = PiperService.getInstance();
 
-  static getInstance() {
-    if (!AlarmService.#instance) {
-      AlarmService.#instance = new AlarmService();
-    }
-    return AlarmService.#instance;
+    /** @type {FFmpegService} */
+    this._ffmpegService = FFmpegService.getInstance();
+
+    /** @type {number} */
+    this._totalAlarms = 0;
+
+    /** @type {number} */
+    this._failedAlarms = 0;
+
+    /** @type {object|null} Aktuell verarbeiteter Alarm */
+    this._current = null;
+
+    // tmp-Verzeichnis sicherstellen
+    const tmpDir = path.join(process.cwd(), 'tmp');
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
   }
 
   /**
-   * Dependency Injection: QueueService setzen.
+   * Gibt die Singleton-Instanz zurück.
+   * @returns {AlarmService}
+   */
+  static getInstance() {
+    if (!instance) instance = new AlarmService();
+    return instance;
+  }
+
+  /**
+   * Setzt die QueueService-Referenz (Dependency Injection aus server.js).
    * @param {object} queueService
    */
   setQueueService(queueService) {
-    this.#queueService = queueService;
+    this._queueService = queueService;
   }
 
   /**
-   * Nimmt eine neue Alarmierung entgegen, normalisiert den Text und
-   * reiht sie in die Queue ein. Gibt sofort zurück (HTTP 202).
+   * Verarbeitet einen Alarm vollständig (wird vom QueueService aufgerufen).
    *
    * @param {AlarmPayload} payload
-   * @returns {{ id: string, position: number, queueSize: number }}
+   * @returns {Promise<void>}
    */
-  receive(payload) {
-    if (!this.#queueService) {
-      throw new ServiceUnavailableError('QueueService nicht initialisiert');
-    }
+  async process(payload) {
+    const alarmId = payload.id || uuidv4();
+    const startedAt = Date.now();
 
-    const id = uuidv4();
-    const normalizedText = (payload.normalize !== false)
-      ? normalizeText(payload.text)
-      : payload.text;
+    this._current = { alarmId, text: payload.text, startedAt };
+    this._totalAlarms++;
 
-    const alarmPayload = {
-      ...payload,
-      id,
-      text: normalizedText,
-      rawText: payload.text,
-      voice: payload.voice || config.piper.defaultVoice,
-      priority: Math.min(Math.max(payload.priority || config.queue.defaultPriority, 1), 10),
-      speed: payload.speed || config.piper.speed,
-      volume: payload.volume !== undefined ? payload.volume : config.piper.volume,
-      gong: payload.gong !== false,
-      source: payload.source || 'api',
-      receivedAt: new Date().toISOString(),
-    };
+    logger.info('Alarm-Verarbeitung gestartet', { alarmId, text: payload.text });
+    eventBus.emit('alarm.started', { alarmId, text: payload.text });
 
-    logger.info('Alarm empfangen', {
-      alarmId: id,
-      text: normalizedText,
-      rawText: payload.text,
-      priority: alarmPayload.priority,
-      source: alarmPayload.source,
-      requestId: payload.requestId,
-    });
-
-    eventBus.emit('alarm.received', {
-      alarmId: id,
-      text: normalizedText,
-      priority: alarmPayload.priority,
-      source: alarmPayload.source,
-    });
-
-    const entry = this.#queueService.enqueue(alarmPayload);
-
-    return {
-      id,
-      position: this.#queueService.size,
-      queueSize: this.#queueService.size,
-    };
-  }
-
-  /**
-   * Verarbeitet einen Alarm aus der Queue:
-   * 1. Gong abspielen (optional)
-   * 2. Text via Piper in WAV wandeln
-   * 3. WAV via FFmpeg als RTP streamen
-   *
-   * @param {AlarmPayload} alarm
-   */
-  async process(alarm) {
-    logger.info('Alarm-Verarbeitung gestartet', {
-      alarmId: alarm.id,
-      text: alarm.text,
-      voice: alarm.voice,
-    });
-
-    eventBus.emit('alarm.started', {
-      alarmId: alarm.id,
-      text: alarm.text,
-      voice: alarm.voice,
-      source: alarm.source,
-    });
-
-    const startTime = Date.now();
-    const tmpWav = path.join(process.cwd(), 'tmp', `${alarm.id}.wav`);
+    const tmpFile = path.join(process.cwd(), 'tmp', `alarm-${alarmId}.wav`);
 
     try {
-      // tmp-Verzeichnis sicherstellen
-      const tmpDir = path.join(process.cwd(), 'tmp');
-      if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-
-      // 1. Gong abspielen
-      if (alarm.gong) {
-        await this._playGong(alarm);
-        await sleep(config.audio.gongDelayMs);
+      // 1. Text normalisieren
+      const normalizedText = normalizeText(payload.text);
+      if (normalizedText !== payload.text) {
+        logger.debug('Text normalisiert', { alarmId, original: payload.text, normalized: normalizedText });
       }
 
-      // 2. TTS: Text → WAV
-      await this._runPiper(alarm, tmpWav);
+      // 2. Gong vorbereiten (optional)
+      const gongFile = _resolveGongFile(payload.gong);
 
-      // 3. WAV → RTP streamen
-      await this._streamRtp(alarm, tmpWav);
+      // 3. TTS erzeugen
+      eventBus.emit('tts.started', { alarmId, text: normalizedText });
 
-      // 4. Post-Delay
-      await sleep(config.audio.postDelayMs);
+      const voice = payload.voice || config.piper.defaultVoice;
+      const speed = payload.speed || config.piper.speed;
 
-      const durationMs = Date.now() - startTime;
-
-      logger.info('Alarm erfolgreich verarbeitet', {
-        alarmId: alarm.id,
-        durationMs,
+      await this._piperService.synthesize({
+        text: normalizedText,
+        voice,
+        speed,
+        outputFile: tmpFile,
       });
 
-      HistoryService.add({
-        id: alarm.id,
-        text: alarm.text,
-        rawText: alarm.rawText,
-        voice: alarm.voice,
-        source: alarm.source,
-        priority: alarm.priority,
-        receivedAt: alarm.receivedAt,
+      eventBus.emit('tts.finished', { alarmId });
+      logger.debug('TTS erzeugt', { alarmId, tmpFile });
+
+      // 4. RTP-Streaming
+      const rtpTarget = _resolveRtpTarget(payload);
+
+      eventBus.emit('stream.started', { alarmId, rtpTarget });
+
+      await this._ffmpegService.streamToRtp({
+        audioFile: tmpFile,
+        gongFile,
+        rtpHost: rtpTarget.host,
+        rtpPort: rtpTarget.port,
+        codec: payload.codec || config.rtp.codec,
+        bitrate: payload.bitrate || config.rtp.bitrate,
+        volume: payload.volume || config.piper.volume,
+      });
+
+      eventBus.emit('stream.finished', { alarmId });
+
+      // 5. Historie pflegen
+      const durationMs = Date.now() - startedAt;
+      const historyEntry = {
+        alarmId,
+        text: payload.text,
+        normalizedText,
+        voice,
+        rtpTarget,
+        durationMs,
+        status: 'success',
         finishedAt: new Date().toISOString(),
-        durationMs,
-        success: true,
-      });
+      };
+      _addToHistory(historyEntry);
 
-      eventBus.emit('alarm.finished', {
-        alarmId: alarm.id,
-        durationMs,
-        success: true,
-      });
+      logger.info('Alarm erfolgreich abgeschlossen', { alarmId, durationMs });
+      eventBus.emit('alarm.finished', { alarmId, durationMs, status: 'success' });
     } catch (err) {
-      const durationMs = Date.now() - startTime;
+      this._failedAlarms++;
+      const durationMs = Date.now() - startedAt;
 
-      logger.error('Alarm-Verarbeitung fehlgeschlagen', {
-        alarmId: alarm.id,
+      _addToHistory({
+        alarmId,
+        text: payload.text,
+        status: 'failed',
         error: err.message,
-        stack: err.stack,
         durationMs,
-      });
-
-      HistoryService.add({
-        id: alarm.id,
-        text: alarm.text,
-        rawText: alarm.rawText,
-        voice: alarm.voice,
-        source: alarm.source,
-        priority: alarm.priority,
-        receivedAt: alarm.receivedAt,
         finishedAt: new Date().toISOString(),
-        durationMs,
-        success: false,
-        error: err.message,
       });
 
+      logger.error('Alarm fehlgeschlagen', { alarmId, error: err.message, stack: err.stack });
+      eventBus.emit('alarm.failed', { alarmId, error: err.message });
       throw err;
     } finally {
-      // Temporäre WAV-Datei aufräumen
-      try {
-        if (fs.existsSync(tmpWav)) fs.unlinkSync(tmpWav);
-      } catch (cleanupErr) {
-        logger.warn('WAV-Cleanup fehlgeschlagen', { file: tmpWav, error: cleanupErr.message });
-      }
+      this._current = null;
+      // Tmp-Datei aufräumen
+      _cleanupFile(tmpFile);
     }
   }
 
   /**
-   * Spielt eine Gong-Datei über FFmpeg+RTP ab.
-   * @param {AlarmPayload} alarm
+   * Gibt Statistiken zurück.
+   * @returns {object}
    */
-  async _playGong(alarm) {
-    const gongDir = config.audio.gongDir;
-    // Priorisierung: priority-spezifischer Gong → standard.wav → überspringen
-    const candidates = [
-      path.join(gongDir, `priority-${alarm.priority}.wav`),
-      path.join(gongDir, 'standard.wav'),
-      path.join(gongDir, 'gong.wav'),
-    ];
-
-    const gongFile = candidates.find((f) => fs.existsSync(f));
-    if (!gongFile) {
-      logger.debug('Keine Gong-Datei gefunden – Gong übersprungen', { gongDir });
-      return;
-    }
-
-    logger.debug('Gong wird abgespielt', { file: gongFile, alarmId: alarm.id });
-
-    await this._ffmpegPlayFile(gongFile, alarm.volume);
+  getStats() {
+    return {
+      totalAlarms: this._totalAlarms,
+      failedAlarms: this._failedAlarms,
+      current: this._current,
+    };
   }
 
   /**
-   * Konvertiert Text zu WAV über Piper TTS.
-   * @param {AlarmPayload} alarm
-   * @param {string} outputWav - Pfad zur Ausgabedatei
+   * Gibt die Alarmhistorie zurück.
+   * @param {number} [limit=50]
+   * @returns {Array<object>}
    */
-  async _runPiper(alarm, outputWav) {
-    const voicesDir = config.piper.voicesDir;
-    const modelFile = path.join(voicesDir, `${alarm.voice}.onnx`);
-    const configFile = `${modelFile}.json`;
-
-    if (!fs.existsSync(modelFile)) {
-      throw new PiperError(`Voice-Modell nicht gefunden: ${alarm.voice}`, {
-        model: modelFile,
-        voicesDir,
-      });
-    }
-
-    if (!fs.existsSync(configFile)) {
-      throw new PiperError(`Voice-Config nicht gefunden: ${alarm.voice}`, {
-        config: configFile,
-      });
-    }
-
-    eventBus.emit('tts.started', { alarmId: alarm.id, voice: alarm.voice });
-
-    await new Promise((resolve, reject) => {
-      const args = [
-        '--model', modelFile,
-        '--config', configFile,
-        '--output_file', outputWav,
-        '--length_scale', String(1.0 / (alarm.speed || config.piper.speed)),
-      ];
-
-      logger.debug('Piper wird gestartet', {
-        binary: config.piper.binary,
-        args: args.join(' '),
-        alarmId: alarm.id,
-      });
-
-      const piper = spawn(config.piper.binary, args, { stdio: ['pipe', 'pipe', 'pipe'] });
-
-      let stderr = '';
-
-      piper.stderr.on('data', (d) => { stderr += d.toString(); });
-
-      piper.stdin.write(alarm.text);
-      piper.stdin.end();
-
-      const timeout = setTimeout(() => {
-        piper.kill('SIGKILL');
-        reject(new PiperError('Piper TTS Timeout', { text: alarm.text, stderr }));
-      }, 30_000);
-
-      piper.on('close', (code) => {
-        clearTimeout(timeout);
-        if (code !== 0) {
-          reject(new PiperError(`Piper exited with code ${code}`, { stderr, text: alarm.text }));
-        } else {
-          logger.debug('Piper TTS abgeschlossen', { alarmId: alarm.id, outputWav });
-          eventBus.emit('tts.finished', { alarmId: alarm.id, voice: alarm.voice });
-          resolve();
-        }
-      });
-
-      piper.on('error', (err) => {
-        clearTimeout(timeout);
-        reject(new PiperError(`Piper konnte nicht gestartet werden: ${err.message}`, {
-          binary: config.piper.binary,
-        }));
-      });
-    });
-  }
-
-  /**
-   * Streamt eine WAV-Datei via FFmpeg als RTP-Stream.
-   * @param {AlarmPayload} alarm
-   * @param {string} wavFile
-   */
-  async _streamRtp(alarm, wavFile) {
-    if (!fs.existsSync(wavFile)) {
-      throw new StreamError(`WAV-Datei nicht gefunden: ${wavFile}`);
-    }
-
-    const rtpUrl = `rtp://${config.rtp.host}:${config.rtp.port}?ttl=${config.rtp.ttl}`;
-
-    eventBus.emit('stream.started', {
-      alarmId: alarm.id,
-      rtpUrl,
-    });
-
-    const volumeFilter = alarm.volume !== 100
-      ? `volume=${alarm.volume / 100}`
-      : null;
-
-    const audioFilters = [volumeFilter].filter(Boolean).join(',');
-
-    const ffmpegArgs = [
-      '-re',
-      '-i', wavFile,
-      ...(audioFilters ? ['-af', audioFilters] : []),
-      '-acodec', config.rtp.codec,
-      '-ar', String(config.rtp.sampleRate),
-      '-b:a', config.rtp.bitrate,
-      '-f', 'rtp',
-      rtpUrl,
-    ];
-
-    logger.debug('FFmpeg RTP-Stream gestartet', {
-      alarmId: alarm.id,
-      args: ffmpegArgs.join(' '),
-      rtpUrl,
-    });
-
-    await new Promise((resolve, reject) => {
-      const ffmpeg = spawn('ffmpeg', ['-y', ...ffmpegArgs], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
-      let stderr = '';
-      ffmpeg.stderr.on('data', (d) => { stderr += d.toString(); });
-
-      const timeout = setTimeout(() => {
-        ffmpeg.kill('SIGKILL');
-        reject(new StreamError('FFmpeg RTP Timeout', { rtpUrl, stderr }));
-      }, (config.rtp.timeoutSec + 60) * 1000);
-
-      ffmpeg.on('close', (code) => {
-        clearTimeout(timeout);
-        if (code !== 0 && code !== null) {
-          // FFmpeg Exit-Code 1 kann trotzdem erfolgreich sein (End of stream)
-          if (stderr.includes('muxing overhead')) {
-            logger.debug('FFmpeg abgeschlossen', { alarmId: alarm.id, code });
-            eventBus.emit('stream.finished', { alarmId: alarm.id, rtpUrl });
-            resolve();
-          } else {
-            reject(new StreamError(`FFmpeg exited with code ${code}`, { stderr, rtpUrl }));
-          }
-        } else {
-          logger.debug('FFmpeg RTP-Stream abgeschlossen', { alarmId: alarm.id, code });
-          eventBus.emit('stream.finished', { alarmId: alarm.id, rtpUrl });
-          resolve();
-        }
-      });
-
-      ffmpeg.on('error', (err) => {
-        clearTimeout(timeout);
-        reject(new StreamError(`FFmpeg konnte nicht gestartet werden: ${err.message}`));
-      });
-    });
-  }
-
-  /**
-   * Spielt eine Audio-Datei über RTP ab (für Gong, Fanfare).
-   * @param {string} file - Pfad zur Audiodatei
-   * @param {number} [volume=100] - Lautstärke
-   */
-  async _ffmpegPlayFile(file, volume = 100) {
-    const rtpUrl = `rtp://${config.rtp.host}:${config.rtp.port}?ttl=${config.rtp.ttl}`;
-
-    const volumeFilter = volume !== 100 ? `volume=${volume / 100}` : null;
-    const audioFilters = [volumeFilter].filter(Boolean).join(',');
-
-    const ffmpegArgs = [
-      '-re',
-      '-i', file,
-      ...(audioFilters ? ['-af', audioFilters] : []),
-      '-acodec', config.rtp.codec,
-      '-ar', String(config.rtp.sampleRate),
-      '-b:a', config.rtp.bitrate,
-      '-f', 'rtp',
-      rtpUrl,
-    ];
-
-    await new Promise((resolve, reject) => {
-      const ffmpeg = spawn('ffmpeg', ['-y', ...ffmpegArgs], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
-      let stderr = '';
-      ffmpeg.stderr.on('data', (d) => { stderr += d.toString(); });
-
-      const timeout = setTimeout(() => {
-        ffmpeg.kill('SIGKILL');
-        reject(new StreamError('FFmpeg Gong/Fanfare Timeout', { file }));
-      }, 60_000);
-
-      ffmpeg.on('close', (code) => {
-        clearTimeout(timeout);
-        if (code !== 0 && code !== null && !stderr.includes('muxing overhead')) {
-          reject(new StreamError(`FFmpeg (Gong) exited with code ${code}`, { stderr, file }));
-        } else {
-          resolve();
-        }
-      });
-
-      ffmpeg.on('error', (err) => {
-        clearTimeout(timeout);
-        reject(new StreamError(`FFmpeg (Gong) Fehler: ${err.message}`));
-      });
-    });
+  getHistory(limit = 50) {
+    return _history.slice(-Math.min(limit, config.history.maxEntries));
   }
 }
 
-module.exports = { AlarmService };
+// ---------------------------------------------------------------------------
+// Modul-private Helfer
+// ---------------------------------------------------------------------------
+
+/**
+ * Ermittelt die Gong-Datei basierend auf dem Payload.
+ * @param {string|undefined} gong
+ * @returns {string|null}
+ */
+function _resolveGongFile(gong) {
+  if (!gong) return null;
+  const gongPath = path.isAbsolute(gong)
+    ? gong
+    : path.join(config.audio.gongDir, gong.endsWith('.wav') ? gong : `${gong}.wav`);
+  if (!fs.existsSync(gongPath)) {
+    logger.warn('Gong-Datei nicht gefunden', { gongPath });
+    return null;
+  }
+  return gongPath;
+}
+
+/**
+ * Ermittelt das RTP-Ziel (Host + Port) aus dem Payload oder der Konfiguration.
+ * @param {AlarmPayload} payload
+ * @returns {{ host: string, port: number }}
+ */
+function _resolveRtpTarget(payload) {
+  return {
+    host: payload.rtpHost || config.rtp.host,
+    port: payload.rtpPort || config.rtp.port,
+  };
+}
+
+/**
+ * Fügt einen Eintrag zur Alarmhistorie hinzu (FIFO, max HISTORY_MAX_ENTRIES).
+ * @param {object} entry
+ */
+function _addToHistory(entry) {
+  _history.push(entry);
+  if (_history.length > config.history.maxEntries) {
+    _history.shift();
+  }
+}
+
+/**
+ * Löscht eine temporäre Datei ohne Fehler zu werfen.
+ * @param {string} filePath
+ */
+function _cleanupFile(filePath) {
+  fs.unlink(filePath, (err) => {
+    if (err && err.code !== 'ENOENT') {
+      logger.warn('Tmp-Datei konnte nicht gelöscht werden', { filePath, error: err.message });
+    }
+  });
+}
+
+/**
+ * @typedef {object} AlarmPayload
+ * @property {string}  [id]        - Request-ID (optional, wird erzeugt wenn fehlend)
+ * @property {string}  text        - Zu sprechender Text
+ * @property {string}  [voice]     - Piper-Stimme (override)
+ * @property {number}  [speed]     - Sprechgeschwindigkeit
+ * @property {number}  [volume]    - Lautstärke 0–100
+ * @property {string}  [gong]      - Gong-Dateiname (ohne Pfad)
+ * @property {string}  [rtpHost]   - RTP-Zieladresse (override)
+ * @property {number}  [rtpPort]   - RTP-Zielport (override)
+ * @property {string}  [codec]     - FFmpeg-Codec (override)
+ * @property {string}  [bitrate]   - Bitrate (override)
+ */
+
+module.exports = { AlarmService, getHistory: () => _history };

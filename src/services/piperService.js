@@ -2,162 +2,175 @@
 
 /**
  * @file services/piperService.js
- * @description Wrapper für den Piper TTS-Prozess.
- * Erzeugt WAV-Dateien aus Text via Piper CLI.
- * Emittiert tts.started, tts.finished, tts.failed Events.
+ * @description Piper TTS – Wandelt Text in WAV-Audio um.
+ *
+ * Ruft das Piper-Binary als Child-Process auf und schreibt die Ausgabe
+ * in eine temporäre WAV-Datei. Unterstützt mehrere Stimmen und
+ * Sprechgeschwindigkeit.
+ *
+ * Piper-Aufruf:
+ *   echo "Text" | piper --model <voice>.onnx --output_file <out>.wav
+ *                        [--length_scale <speed>]
  */
 
 const { spawn } = require('child_process');
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
 
-const logger = require('../utils/logger').child({ service: 'PiperService' });
-const eventBus = require('../events/eventBus');
 const config = require('../config');
-const { PiperError } = require('../errors');
+const logger = require('../utils/logger').child({ service: 'PiperService' });
 
-/**
- * Erzeugt eine WAV-Datei aus dem gegebenen Text via Piper TTS.
- * @param {object} params
- * @param {string} params.text - Einzusprechender Text
- * @param {string} [params.voice] - Piper-Stimme (Dateiname ohne .onnx)
- * @param {string} params.outputFile - Absoluter Pfad zur Ausgabe-WAV-Datei
- * @param {number} [params.speed] - Sprechgeschwindigkeit (0.5–2.0)
- * @param {string} [params.requestId] - Tracing-ID
- * @returns {Promise<void>}
- * @throws {PiperError}
- */
-async function synthesize({ text, voice, outputFile, speed, requestId }) {
-  const resolvedVoice = voice || config.piper.defaultVoice;
-  const resolvedSpeed = speed || config.piper.speed;
-  const modelFile = _resolveModelFile(resolvedVoice);
+/** @type {PiperService|null} */
+let instance = null;
 
-  // tmp-Verzeichnis sicherstellen
-  const tmpDir = path.dirname(outputFile);
-  if (!fs.existsSync(tmpDir)) {
-    fs.mkdirSync(tmpDir, { recursive: true });
+class PiperService {
+  constructor() {
+    this._binary = config.piper.binary;
+    this._voicesDir = config.piper.voicesDir;
   }
 
-  logger.debug('Piper TTS starten', {
-    voice: resolvedVoice,
-    modelFile,
-    outputFile,
-    speed: resolvedSpeed,
-    requestId,
-    textLength: text.length,
-  });
+  /**
+   * Gibt die Singleton-Instanz zurück.
+   * @returns {PiperService}
+   */
+  static getInstance() {
+    if (!instance) instance = new PiperService();
+    return instance;
+  }
 
-  eventBus.emit('tts.started', { voice: resolvedVoice, requestId });
+  /**
+   * Erzeugt eine WAV-Datei aus dem übergebenen Text.
+   *
+   * @param {object} opts
+   * @param {string} opts.text        - Zu sprechender Text (bereits normalisiert)
+   * @param {string} opts.voice       - Voice-Name (ohne Pfad und Extension)
+   * @param {number} [opts.speed=1.0] - Sprechgeschwindigkeit (length_scale)
+   * @param {string} opts.outputFile  - Ziel-WAV-Dateiname (absoluter Pfad)
+   * @returns {Promise<void>}
+   * @throws {PiperError} Bei Fehler im Piper-Prozess
+   */
+  async synthesize({ text, voice, speed = 1.0, outputFile }) {
+    const modelFile = this._resolveModel(voice);
 
-  return new Promise((resolve, reject) => {
-    const args = [
-      '--model', modelFile,
-      '--output_file', outputFile,
-      '--length_scale', String(1.0 / resolvedSpeed), // Piper: length_scale = 1/speed
+    logger.debug('Piper TTS gestartet', { voice, modelFile, outputFile, textLength: text.length });
+
+    await this._runPiper({ text, modelFile, speed, outputFile });
+
+    // Sicherstellen dass die Ausgabedatei existiert und nicht leer ist
+    if (!fs.existsSync(outputFile)) {
+      throw Object.assign(
+        new Error(`Piper hat keine Ausgabedatei erzeugt: ${outputFile}`),
+        { code: 'PIPER_NO_OUTPUT' }
+      );
+    }
+
+    const stat = fs.statSync(outputFile);
+    if (stat.size === 0) {
+      throw Object.assign(
+        new Error(`Piper hat eine leere WAV-Datei erzeugt: ${outputFile}`),
+        { code: 'PIPER_EMPTY_OUTPUT' }
+      );
+    }
+
+    logger.debug('Piper TTS abgeschlossen', { outputFile, sizeBytes: stat.size });
+  }
+
+  /**
+   * Gibt alle verfügbaren Stimmen im Voices-Verzeichnis zurück.
+   * @returns {string[]} Array von Voice-Namen (ohne Extension)
+   */
+  listVoices() {
+    if (!fs.existsSync(this._voicesDir)) {
+      logger.warn('Voices-Verzeichnis nicht gefunden', { voicesDir: this._voicesDir });
+      return [];
+    }
+
+    return fs.readdirSync(this._voicesDir)
+      .filter((f) => f.endsWith('.onnx'))
+      .map((f) => f.replace(/\.onnx$/, ''));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Ermittelt den absoluten Pfad zur ONNX-Modelldatei.
+   * @param {string} voice
+   * @returns {string}
+   * @throws {Error} Wenn das Modell nicht gefunden wird
+   */
+  _resolveModel(voice) {
+    // Unterstütze absoluten Pfad, relativen Pfad und nur den Namen
+    if (path.isAbsolute(voice) && fs.existsSync(voice)) return voice;
+
+    const candidates = [
+      voice,
+      path.join(this._voicesDir, voice),
+      path.join(this._voicesDir, `${voice}.onnx`),
     ];
 
-    const piper = spawn(config.piper.binary, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
 
-    let stderrOutput = '';
-
-    piper.stderr.on('data', (data) => {
-      stderrOutput += data.toString();
-    });
-
-    piper.on('error', (err) => {
-      logger.error('Piper-Prozess konnte nicht gestartet werden', {
-        error: err.message,
-        binary: config.piper.binary,
-        requestId,
-      });
-      eventBus.emit('tts.failed', { error: err.message, requestId });
-      reject(new PiperError(`Piper-Binary nicht gefunden: ${config.piper.binary}`, {
-        error: err.message,
-        binary: config.piper.binary,
-      }));
-    });
-
-    piper.on('close', (code) => {
-      if (code !== 0) {
-        const errMsg = `Piper beendet mit Code ${code}: ${stderrOutput.trim()}`;
-        logger.error('Piper fehlgeschlagen', { code, stderr: stderrOutput.trim(), requestId });
-        eventBus.emit('tts.failed', { error: errMsg, requestId });
-        reject(new PiperError(errMsg, { exitCode: code, stderr: stderrOutput.trim() }));
-        return;
-      }
-
-      if (!fs.existsSync(outputFile)) {
-        const errMsg = 'Piper erzeugte keine Ausgabedatei';
-        logger.error(errMsg, { outputFile, requestId });
-        eventBus.emit('tts.failed', { error: errMsg, requestId });
-        reject(new PiperError(errMsg, { outputFile }));
-        return;
-      }
-
-      const stat = fs.statSync(outputFile);
-      logger.debug('Piper TTS abgeschlossen', {
-        outputFile,
-        fileSizeBytes: stat.size,
-        requestId,
-      });
-
-      eventBus.emit('tts.finished', { outputFile, fileSizeBytes: stat.size, requestId });
-      resolve();
-    });
-
-    // Text via stdin übergeben
-    piper.stdin.write(text);
-    piper.stdin.end();
-  });
-}
-
-/**
- * Listet alle verfügbaren Stimmen im voices-Verzeichnis auf.
- * @returns {string[]}
- */
-function listVoices() {
-  const voicesDir = config.piper.voicesDir;
-
-  if (!fs.existsSync(voicesDir)) {
-    logger.warn('Voices-Verzeichnis nicht gefunden', { voicesDir });
-    return [];
+    throw Object.assign(
+      new Error(`Piper-Stimme nicht gefunden: ${voice} (Suchpfade: ${candidates.join(', ')})`),
+      { code: 'PIPER_VOICE_NOT_FOUND', statusCode: 400 }
+    );
   }
 
-  return fs
-    .readdirSync(voicesDir)
-    .filter((f) => f.endsWith('.onnx'))
-    .map((f) => f.replace('.onnx', ''));
-}
+  /**
+   * Führt den Piper-Prozess aus.
+   * Text wird via stdin übergeben.
+   *
+   * @param {object} opts
+   * @returns {Promise<void>}
+   */
+  _runPiper({ text, modelFile, speed, outputFile }) {
+    return new Promise((resolve, reject) => {
+      const args = [
+        '--model', modelFile,
+        '--output_file', outputFile,
+        '--length_scale', String(speed),
+        '--sentence_silence', '0.3',
+      ];
 
-/**
- * Prüft ob eine Stimme verfügbar ist.
- * @param {string} voice
- * @returns {boolean}
- */
-function voiceExists(voice) {
-  return listVoices().includes(voice);
-}
+      logger.debug('Piper spawn', { binary: this._binary, args });
 
-/**
- * Löst den absoluten Pfad zur Modell-Datei auf.
- * @param {string} voice
- * @returns {string}
- * @throws {PiperError}
- */
-function _resolveModelFile(voice) {
-  const modelFile = path.join(config.piper.voicesDir, `${voice}.onnx`);
+      const proc = spawn(this._binary, args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
 
-  if (!fs.existsSync(modelFile)) {
-    throw new PiperError(`Piper-Modell nicht gefunden: ${voice}`, {
-      voice,
-      expectedPath: modelFile,
-      availableVoices: listVoices(),
+      let stderr = '';
+
+      proc.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      proc.on('error', (err) => {
+        reject(Object.assign(
+          new Error(`Piper konnte nicht gestartet werden: ${err.message}`),
+          { code: 'PIPER_SPAWN_ERROR', cause: err }
+        ));
+      });
+
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          reject(Object.assign(
+            new Error(`Piper beendet mit Exit-Code ${code}: ${stderr.slice(0, 500)}`),
+            { code: 'PIPER_EXIT_ERROR', exitCode: code, stderr }
+          ));
+          return;
+        }
+        resolve();
+      });
+
+      // Text via stdin senden
+      proc.stdin.write(text, 'utf-8');
+      proc.stdin.end();
     });
   }
-
-  return modelFile;
 }
 
-module.exports = { synthesize, listVoices, voiceExists };
+module.exports = { PiperService };
