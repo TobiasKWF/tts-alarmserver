@@ -380,10 +380,10 @@ const state = {
   totalAlarms:  0,
   failedAlarms: 0,
   queueSize:    0,
-  currentAlarm: null,
+  currentAlarm: null,   // { alarmId, text, voice } – gesetzt von alarm.started
   history:      [],
   errors:       [],
-  serverUptimeBase: null,  // Date when server started (estimated)
+  serverUptimeBase: null,
 };
 
 // -----------------------------------------------------------------------
@@ -412,7 +412,6 @@ let reconnectDelay = 1000;
 const MAX_DELAY    = 30_000;
 
 function wsConnect() {
-  // Pfad /ws explizit angeben
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const url   = `${proto}://${location.host}/ws`;
 
@@ -454,18 +453,16 @@ function setWsStatus(connected, label) {
 function handleMessage(msg) {
   switch (msg.type) {
 
-    // Initialer Snapshot beim Connect
     case 'snapshot': {
-      if (msg.server)  applyServer(msg.server);
-      if (msg.queue)   applyQueueStats(msg.queue);
-      if (msg.alarm)   applyAlarmStats(msg.alarm);
-      if (msg.rtp)     el('srvRtp').textContent = `${msg.rtp.host}:${msg.rtp.port}`;
+      if (msg.server)    applyServer(msg.server);
+      if (msg.queue)     applyQueueStats(msg.queue);
+      if (msg.alarm)     applyAlarmStats(msg.alarm);
+      if (msg.rtp)       el('srvRtp').textContent = `${msg.rtp.host}:${msg.rtp.port}`;
       if (msg.websocket) el('srvWsClients').textContent = msg.websocket.connectedClients ?? 0;
-      if (msg.history) applyHistory(msg.history);
+      if (msg.history)   applyHistory(msg.history);
       break;
     }
 
-    // Regelmäßiges Stats-Update (alle 10s)
     case 'server.stats': {
       if (msg.server)    applyServer(msg.server);
       if (msg.queue)     applyQueueStats(msg.queue);
@@ -476,43 +473,87 @@ function handleMessage(msg) {
     }
 
     case 'alarm.received': {
-      // Nur Zähler erhöhen; Queue wird über queue.changed aktualisiert
-      state.totalAlarms++;
-      updateKpis();
+      // KEIN lokales Inkrementieren von totalAlarms hier.
+      // Der autoritätive Zähler kommt ausschließlich über snapshot / server.stats
+      // (alarm.stats.totalAlarms). Ein lokales Increment würde zu Double-Counting
+      // führen, da jeder neue WS-Client beim Reconnect einen snapshot erhält
+      // der den echten Serverstand enthält und totalAlarms überschreibt.
+      // Das queue.changed Event das gleichzeitig emittiert wird, aktualisiert
+      // die Queue-Anzeige bereits korrekt.
       break;
     }
 
     case 'alarm.started': {
-      setCurrentAnnouncement(msg, true);
+      // Text und Stimme zwischenspeichern, damit alarm.finished und
+      // alarm.failed noch darauf zugreifen können, nachdem currentAlarm
+      // gelöscht wurde.
+      state.currentAlarm = {
+        alarmId: msg.alarmId,
+        text:    msg.text  || '',
+        voice:   msg.voice || '',
+      };
+      setCurrentAnnouncement(state.currentAlarm, true);
       break;
     }
 
     case 'alarm.finished': {
-      addHistoryItem({ ...msg, status: 'success' });
+      // Text/Voice aus state.currentAlarm lesen BEVOR es gelöscht wird.
+      // alarm.finished selbst trägt keinen text (AlarmService emittiert
+      // nur { alarmId, durationMs, status }).
+      const finishedAlarm = state.currentAlarm;
       setCurrentAnnouncement(null, false);
       state.currentAlarm = null;
+
+      addHistoryItem({
+        alarmId:    msg.alarmId,
+        text:       finishedAlarm?.text || '',
+        voice:      finishedAlarm?.voice || '',
+        durationMs: msg.durationMs,
+        status:     'success',
+      });
       updateKpis();
       break;
     }
 
     case 'alarm.failed': {
-      state.failedAlarms++;
-      addHistoryItem({ ...msg, status: 'failed', error: msg.error });
-      addErrorItem({ message: msg.error || 'Alarm fehlgeschlagen', code: msg.code });
+      // Text/Voice aus state.currentAlarm lesen BEVOR es gelöscht wird.
+      const failedAlarm = state.currentAlarm;
       setCurrentAnnouncement(null, false);
       state.currentAlarm = null;
+
+      // failedAlarms-Zähler nur lokal erhöhen wenn server.stats nicht
+      // zeitnah einen aktualisierten Wert liefert (nächstes Intervall).
+      // Wird durch applyAlarmStats() überschrieben sobald server.stats eintrifft.
+      state.failedAlarms++;
+
+      addHistoryItem({
+        alarmId: msg.alarmId,
+        text:    failedAlarm?.text || '',
+        voice:   failedAlarm?.voice || '',
+        status:  'failed',
+        error:   msg.error,
+      });
+      addErrorItem({ message: msg.error || 'Alarm fehlgeschlagen', code: msg.code });
       updateKpis();
       break;
     }
 
     case 'tts.started': {
-      // Aktuelle Durchsage aktualisieren falls alarm.started noch nicht kam
-      if (!state.currentAlarm) setCurrentAnnouncement(msg, true);
+      // Nur als Fallback wenn alarm.started noch nicht ankam.
+      // tts.started enthält kein text-Feld – wir setzen nur den
+      // alarmId damit die Progressbar sichtbar wird.
+      if (!state.currentAlarm) {
+        state.currentAlarm = {
+          alarmId: msg.alarmId,
+          text:    '',
+          voice:   '',
+        };
+        setCurrentAnnouncement(state.currentAlarm, true);
+      }
       break;
     }
 
     case 'stream.finished': {
-      // Progressbar stoppen (alarm.finished kommt gleich danach)
       el('progressBar').classList.remove('animate');
       break;
     }
@@ -546,7 +587,6 @@ function applyServer(server) {
   el('srvPid').textContent      = server.pid      || '--';
   el('kpiUptime').textContent   = server.uptimeHuman || formatUptime(server.uptime || 0);
   el('kpiMemory').textContent   = server.memory ? `${server.memory.heapUsedMB} MB` : '--';
-  // Uptime-Basis setzen für lokalen Ticker
   if (server.uptime != null) {
     state.serverUptimeBase = Date.now() - server.uptime * 1000;
   }
@@ -554,14 +594,20 @@ function applyServer(server) {
 
 function applyQueueStats(queue) {
   const size = queue.size ?? 0;
+  // state.queueSize synchron halten damit KPI zwischen den
+  // server.stats-Zyklen korrekt bleibt.
+  state.queueSize = size;
   el('kpiQueue').textContent    = size;
   el('queueBadge').textContent  = size;
   el('srvQueueMax').textContent = queue.maxSize ?? '--';
   if (queue.items) renderQueue(queue.items);
+  // failedTotal aus Queue-Statistik übernehmen wenn verfügbar.
+  // (QueueService zählt nur die vom Worker verarbeiteten Fehler.)
   if (queue.failedTotal != null) state.failedAlarms = queue.failedTotal;
 }
 
 function applyAlarmStats(alarm) {
+  // Autoritätive Zähler vom Server überschreiben lokale Schätzwerte.
   if (alarm.totalAlarms  != null) state.totalAlarms  = alarm.totalAlarms;
   if (alarm.failedAlarms != null) state.failedAlarms = alarm.failedAlarms;
   updateKpis();
@@ -572,8 +618,13 @@ function applyHistory(items) {
   renderHistory(state.history);
 }
 
+/**
+ * Aktualisiert Queue-Anzeige und hält state.queueSize synchron.
+ * Wird durch queue.changed und queue.empty Events aufgerufen.
+ * @param {Array} items
+ */
 function applyQueueItems(items) {
-  const size = items.length;
+  const size = Array.isArray(items) ? items.length : 0;
   state.queueSize = size;
   el('kpiQueue').textContent   = size;
   el('queueBadge').textContent = size;
@@ -590,7 +641,7 @@ function updateKpis() {
   el('kpiStatus').style.color = state.connected ? 'var(--success)' : 'var(--error)';
 }
 
-// Lokaler Uptime-Ticker (aktualisiert jede Sekunde)
+// Lokaler Uptime-Ticker
 setInterval(() => {
   if (state.serverUptimeBase == null) return;
   const elapsed = Math.floor((Date.now() - state.serverUptimeBase) / 1000);
@@ -607,10 +658,9 @@ function setCurrentAnnouncement(data, active) {
   const badgeEl = el('currentBadge');
 
   if (active && data) {
-    state.currentAlarm = data;
-    textEl.textContent = data.text || '(unbekannt)';
+    textEl.textContent = data.text || '(Audiodatei)';
     textEl.classList.remove('idle');
-    el('currentId').textContent    = `ID: ${String(data.alarmId || data.id || '').slice(0,8)}…`;
+    el('currentId').textContent    = `ID: ${String(data.alarmId || '').slice(0,8)}…`;
     el('currentVoice').textContent = data.voice ? `Stimme: ${data.voice}` : '';
     el('currentDuration').textContent = '';
     metaEl.style.display = 'flex';
@@ -618,7 +668,6 @@ function setCurrentAnnouncement(data, active) {
     badgeEl.textContent = 'Aktiv';
     badgeEl.className   = 'badge badge-success';
   } else {
-    state.currentAlarm = null;
     textEl.textContent = 'Keine aktive Durchsage.';
     textEl.classList.add('idle');
     metaEl.style.display = 'none';
@@ -652,12 +701,12 @@ function renderQueue(items) {
 // -----------------------------------------------------------------------
 function addHistoryItem(data) {
   const entry = {
-    alarmId:    data.alarmId || data.id,
-    text:       data.text       || state.currentAlarm?.text || '(unbekannt)',
-    voice:      data.voice      || state.currentAlarm?.voice,
-    status:     data.status     || (data.error ? 'failed' : 'success'),
-    error:      data.error,
-    durationMs: data.durationMs,
+    alarmId:    data.alarmId,
+    text:       data.text   || '(unbekannt)',
+    voice:      data.voice  || '',
+    status:     data.status || (data.error ? 'failed' : 'success'),
+    error:      data.error  || null,
+    durationMs: data.durationMs || null,
     finishedAt: new Date().toISOString(),
   };
   state.history.unshift(entry);
@@ -693,7 +742,11 @@ function renderHistory(items) {
 // Error-Log
 // -----------------------------------------------------------------------
 function addErrorItem(data) {
-  state.errors.unshift({ message: data.message || String(data), code: data.code, time: new Date().toISOString() });
+  state.errors.unshift({
+    message: data.message || String(data),
+    code:    data.code || null,
+    time:    new Date().toISOString(),
+  });
   if (state.errors.length > 20) state.errors.pop();
   renderErrors();
 }
@@ -714,18 +767,18 @@ function renderErrors() {
 }
 
 // -----------------------------------------------------------------------
-// Statistik-Polling als Fallback (alle 30s wenn WS inaktiv)
+// Statistik-Polling als Fallback (alle 30s)
 // -----------------------------------------------------------------------
 async function fetchStats() {
   try {
     const res  = await fetch('/stats');
     if (!res.ok) return;
     const data = await res.json();
-    if (data.server)    applyServer(data.server);
-    if (data.queue)     applyQueueStats(data.queue);
-    if (data.alarm)     applyAlarmStats(data.alarm);
-    if (data.rtp)       el('srvRtp').textContent = `${data.rtp.host}:${data.rtp.port}`;
-    if (data.history)   applyHistory(data.history);
+    if (data.server)  applyServer(data.server);
+    if (data.queue)   applyQueueStats(data.queue);
+    if (data.alarm)   applyAlarmStats(data.alarm);
+    if (data.rtp)     el('srvRtp').textContent = `${data.rtp.host}:${data.rtp.port}`;
+    if (data.history) applyHistory(data.history);
   } catch (_) {}
 }
 
