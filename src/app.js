@@ -42,20 +42,23 @@ function createApp() {
   app.use(
     helmet({
       contentSecurityPolicy: {
+        useDefaults: false,          // Kein auto-append von upgrade-insecure-requests
         directives: {
           defaultSrc:  ["'self'"],
           scriptSrc:   ["'self'", "'unsafe-inline'"],
           styleSrc:    ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
           fontSrc:     ["'self'", 'data:', 'https://fonts.gstatic.com'],
-          // fetch() darf an beliebige gleiche Origin gehen
-          // (IP-Adresse, Hostname – egal wie das Dashboard aufgerufen wird)
           connectSrc:  ["'self'", '*'],
           imgSrc:      ["'self'", 'data:'],
           objectSrc:   ["'none'"],
           frameAncestors: ["'none'"],
+          // upgrade-insecure-requests BEWUSST WEGGELASSEN
+          // Server laeuft auf HTTP, kein HTTPS verfuegbar
         },
       },
       crossOriginEmbedderPolicy: false,
+      // HSTS deaktivieren – kein HTTPS vorhanden
+      strictTransportSecurity: false,
     })
   );
 
