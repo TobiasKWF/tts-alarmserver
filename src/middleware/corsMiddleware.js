@@ -10,6 +10,12 @@
  * Umgebungsvariablen:
  *   CORS_ORIGIN    – Erlaubter Origin (Default: "*" in dev, strikt in prod)
  *   CORS_ORIGINS   – Kommaseparierte Liste erlaubter Origins (Allowlist)
+ *
+ * WICHTIG: CORS darf niemals auf `false` gesetzt werden wenn kein expliziter
+ * Origin konfiguriert ist – das blockiert WebSocket-Upgrades im Browser,
+ * weil WS-Handshakes einen Origin-Header senden und CORS false alle
+ * cross-origin Requests (inkl. same-host WS) ablehnt.
+ * Fallback ist deshalb immer '*' (offen), nicht false (blockiert).
  */
 
 const cors = require('cors');
@@ -21,6 +27,9 @@ const isDev = process.env.NODE_ENV !== 'production';
  * Erlaubte Origins aus Umgebungsvariablen lesen.
  * CORS_ORIGINS überschreibt CORS_ORIGIN wenn gesetzt.
  *
+ * Gibt niemals `false` zurück – Fallback ist '*' um WebSocket-Upgrades
+ * nicht zu blockieren wenn kein expliziter Origin konfiguriert ist.
+ *
  * @returns {string|string[]}
  */
 function resolveAllowedOrigins() {
@@ -30,7 +39,14 @@ function resolveAllowedOrigins() {
   }
   const single = process.env.CORS_ORIGIN;
   if (single) return single;
-  return isDev ? '*' : false; // In Production CORS standardmäßig deaktivieren
+
+  // Kein CORS_ORIGIN gesetzt: immer '*' als Fallback.
+  // In Production sollte CORS_ORIGIN explizit in der .env gesetzt werden,
+  // aber ein fehlender Wert darf den WebSocket-Handshake nicht blockieren.
+  if (!isDev) {
+    logger.warn('CORS_ORIGIN ist nicht gesetzt. CORS ist offen (*). Setze CORS_ORIGIN in der .env für Produktionsbetrieb.');
+  }
+  return '*';
 }
 
 const allowedOrigins = resolveAllowedOrigins();
