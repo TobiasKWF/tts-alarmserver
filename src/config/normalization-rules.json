@@ -1,0 +1,38 @@
+[
+  {
+    "comment": "Beispiel für benutzerdefinierte Normalisierungsregel.",
+    "pattern": "\\bWF\\b",
+    "flags": "gi",
+    "replacement": "Werkfeuerwehr"
+  },
+  {
+    "pattern": "\\bELW\\b",
+    "flags": "gi",
+    "replacement": "Einsatzleitwagen"
+  },
+  {
+    "pattern": "\\bGW-L\\b",
+    "flags": "gi",
+    "replacement": "Gerätewagen Logistik"
+  },
+  {
+    "pattern": "\\bGW-Mess\\b",
+    "flags": "gi",
+    "replacement": "Gerätewagen Messtechnik"
+  },
+  {
+    "pattern": "\\bABC\\b",
+    "flags": "gi",
+    "replacement": "Gefahrstoffeinsatz"
+  },
+  {
+    "pattern": "\\bVU\\b",
+    "flags": "gi",
+    "replacement": "Verkehrsunfall"
+  },
+  {
+    "pattern": "\\bVU-E\\b",
+    "flags": "gi",
+    "replacement": "Verkehrsunfall mit eingeklemmter Person"
+  }
+]
