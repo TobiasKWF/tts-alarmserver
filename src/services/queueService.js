@@ -31,11 +31,21 @@ class QueueService {
     /** @type {Array<QueueEntry>} */
     this._queue = [];
 
-    /** @type {boolean} */
+    /** @type {boolean} Worker läuft (darf laufen) */
     this._running = false;
 
-    /** @type {boolean} */
+    /** @type {boolean} Verarbeitung pausiert */
     this._paused = false;
+
+    /**
+     * Guard gegen doppelte _loop()-Instanzen.
+     * Wird auf true gesetzt wenn _loop() aktiv läuft;
+     * verhindert, dass resume() oder ein erneutes startWorker()
+     * einen zweiten Loop startet während der erste noch im
+     * await _sleep() oder await alarmService.process() steckt.
+     * @type {boolean}
+     */
+    this._loopActive = false;
 
     /** @type {AlarmService|null} */
     this._alarmService = null;
@@ -114,21 +124,28 @@ class QueueService {
 
   /**
    * Startet den Worker-Loop.
+   * Sicher mehrfach aufrufbar – startet keinen zweiten Loop wenn bereits einer läuft.
    * @param {import('./alarmService').AlarmService} alarmService
    */
   startWorker(alarmService) {
     this._alarmService = alarmService;
-    if (this._running) return;
+    if (this._running) {
+      logger.debug('startWorker: Worker läuft bereits, kein neuer Loop gestartet');
+      return;
+    }
     this._running = true;
     logger.info('Queue-Worker gestartet');
-    this._loop();
+    this._startLoop();
   }
 
   /**
-   * Stoppt den Worker-Loop sauber (wartet nicht auf laufenden Alarm).
+   * Stoppt den Worker-Loop sauber.
+   * Der aktuell laufende Alarm wird noch abgeschlossen.
+   * Nach stop() kann startWorker() erneut aufgerufen werden.
    */
   stop() {
-    this._running = false;
+    this._running    = false;
+    this._loopActive = false;
     logger.info('Queue-Worker gestoppt', { remaining: this._queue.length });
   }
 
@@ -136,16 +153,33 @@ class QueueService {
   pause() {
     this._paused = true;
     logger.info('Queue pausiert');
-    eventBus.emit('queue.changed', { size: this._queue.length, items: this._getPublicQueue(), paused: true });
+    eventBus.emit('queue.changed', {
+      size:   this._queue.length,
+      items:  this._getPublicQueue(),
+      paused: true,
+    });
   }
 
-  /** Setzt die Verarbeitung fort. */
+  /**
+   * Setzt die Verarbeitung fort.
+   * Startet _loop() nur wenn kein Loop bereits aktiv ist.
+   */
   resume() {
     this._paused = false;
     logger.info('Queue fortgesetzt');
-    eventBus.emit('queue.changed', { size: this._queue.length, items: this._getPublicQueue(), paused: false });
-    // Loop könnte eingeschlafen sein – neu starten
-    if (this._running) this._loop();
+    eventBus.emit('queue.changed', {
+      size:   this._queue.length,
+      items:  this._getPublicQueue(),
+      paused: false,
+    });
+    // Nur einen neuen Loop starten wenn:
+    // (a) Worker generell laufen soll (_running)
+    // (b) noch kein Loop aktiv ist (_loopActive)
+    // Ohne diese Prüfung würde resume() einen zweiten Loop erzeugen
+    // wenn der erste Loop noch im await steckt.
+    if (this._running && !this._loopActive) {
+      this._startLoop();
+    }
   }
 
   /**
@@ -177,8 +211,27 @@ class QueueService {
   // ---------------------------------------------------------------------------
 
   /**
+   * Setzt _loopActive und startet den Loop.
+   * Einzige erlaubte Einstiegspunkt für _loop().
+   * @private
+   */
+  _startLoop() {
+    if (this._loopActive) {
+      logger.debug('_startLoop: Loop bereits aktiv, wird nicht erneut gestartet');
+      return;
+    }
+    this._loopActive = true;
+    this._loop().finally(() => {
+      this._loopActive = false;
+      logger.debug('Queue-Loop beendet');
+    });
+  }
+
+  /**
    * Haupt-Loop: zieht Einträge aus der Queue und verarbeitet sie sequenziell.
    * Beendet sich selbst wenn _running = false oder _paused = true.
+   * Darf nur über _startLoop() gestartet werden.
+   * @private
    */
   async _loop() {
     while (this._running && !this._paused) {
