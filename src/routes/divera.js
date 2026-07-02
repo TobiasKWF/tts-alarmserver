@@ -13,6 +13,10 @@
  *
  * Divera Webhook-Dokumentation:
  *   https://api.divera247.com/#tag/Alarmierung/operation/postAlarm
+ *
+ * Vorab-Gong Konfiguration:
+ *   DIVERA_GONG=<gong-dateiname-ohne-.wav>  in .env
+ *   Fallback: AUDIO_DEFAULT_GONG oder kein Gong (null)
  */
 
 const { Router } = require('express');
@@ -104,11 +108,19 @@ router.post('/', diveraValidation, (req, res, next) => {
     const ttsText = _buildDiveraTtsText({ title, text, address });
     const alarmId = uuidv4();
 
+    // Vorab-Gong: config.divera.gong → config.audio.defaultGong → null
+    const gong = (config.divera && config.divera.gong)
+      ? config.divera.gong
+      : (config.audio && config.audio.defaultGong)
+        ? config.audio.defaultGong
+        : null;
+
     logger.info('Divera-Webhook empfangen', {
       alarmId,
       requestId: req.requestId,
       title,
       address,
+      gong: gong || '(kein Gong)',
       textLength: text ? text.length : 0,
     });
 
@@ -119,7 +131,7 @@ router.post('/', diveraValidation, (req, res, next) => {
       voice: config.piper.defaultVoice,
       speed: config.piper.speed,
       volume: config.piper.volume,
-      gong: null,           // Kein Standard-Gong – kann per Konfiguration ergänzt werden
+      gong,                 // Vorab-Gong: gesetzt via DIVERA_GONG in .env oder null
       rtpHost: config.rtp.host,
       rtpPort: config.rtp.port,
       source: 'divera',
