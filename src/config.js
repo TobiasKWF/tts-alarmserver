@@ -131,11 +131,13 @@ const config = {
   // --- Audio -----------------------------------------------------------------
   audio: {
     /** Verzeichnis für Gong-/Fanfare-Dateien */
-    gongDir:     str('AUDIO_GONG_DIR', './gong'),
+    gongDir:      str('AUDIO_GONG_DIR', './gong'),
+    /** Standard-Gong als Fallback für alle Quellen (Dateiname ohne .wav, leer = kein Gong) */
+    defaultGong:  str('AUDIO_DEFAULT_GONG', ''),
     /** Pause zwischen Gong und TTS in ms */
-    gongDelayMs: int('AUDIO_GONG_DELAY_MS', 500),
+    gongDelayMs:  int('AUDIO_GONG_DELAY_MS', 500),
     /** Pause nach TTS in ms */
-    postDelayMs: int('AUDIO_POST_DELAY_MS', 1_000),
+    postDelayMs:  int('AUDIO_POST_DELAY_MS', 1_000),
   },
 
   // --- RTP Streaming ---------------------------------------------------------
@@ -196,6 +198,8 @@ const config = {
     baseUrl:     str('DIVERA_BASE_URL', 'https://www.divera247.com/api/v2'),
     /** Divera Access-Token */
     accessToken: str('DIVERA_ACCESS_TOKEN', ''),
+    /** Vorab-Gong für Divera-Alarme (Dateiname ohne .wav, leer = kein Gong) */
+    gong:        str('DIVERA_GONG', ''),
   },
 
   // --- Prometheus (optional) -------------------------------------------------
