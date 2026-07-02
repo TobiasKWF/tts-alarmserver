@@ -138,6 +138,14 @@
       <div class="poll-dot" id="pollDot"></div>
       <span id="pollLabel">Verbinde…</span>
     </div>
+    <div class="poll-indicator" id="wsIndicator" role="status" aria-live="polite">
+      <div class="poll-dot" id="wsDot"></div>
+      <span id="wsLabel">WS getrennt</span>
+    </div>
+    <div class="poll-indicator" id="wsIndicator" role="status" aria-live="polite">
+      <div class="poll-dot" id="wsDot"></div>
+      <span id="wsLabel">WS getrennt</span>
+    </div>
     <button class="btn-icon" id="themeToggle" aria-label="Theme wechseln" title="Hell / Dunkel">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
@@ -261,6 +269,8 @@ const state = {
   totalAlarms:  0,
   failedAlarms: 0,
   serverUptimeBase: null,
+  history: [],
+  wsConnected: false,
 };
 
 // ---------------------------------------------------------------------------

@@ -257,7 +257,7 @@ function _addToHistory(entry) {
   if (_history.length > maxEntries) {
     _history.shift();
   }
-  eventBus.emit('queue.changed', { historyLength: _history.length });
+  eventBus.emit('history.changed', { entry, historyLength: _history.length });
 }
 
 /**

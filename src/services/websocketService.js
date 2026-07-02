@@ -43,6 +43,7 @@ const BROADCAST_EVENTS = [
   'alarm.received',
   'alarm.started',
   'alarm.finished',
+  'history.changed',
   'alarm.failed',
   'tts.started',
   'tts.finished',
@@ -185,7 +186,7 @@ function _sendSnapshot(ws) {
   try {
     const { AlarmService } = require('./alarmService');
     const stats   = _buildStatsPayload();
-    const history = AlarmService.getInstance().getHistory(20);
+    const history = AlarmService.getInstance().getHistory(50);
 
     _sendToClient(ws, {
       type:    'snapshot',
