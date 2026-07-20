@@ -46,8 +46,8 @@ curl -s -X POST "${BASE}/api/divera" \
   -H "Content-Type: application/json" \
   -d '{
     "title": "B 2",
-    "text": "B 2 - verdächtiger Rauch\nSondersignal: Ja\nEinsatzortzusatz: Oderwald Bauwagen Kindergarten\nDatum: 20.07.2026\nZeit: 10:02:04\nEinsatznummer: 1260104330\n\n----- Einheiten -----\n\nWF FFw Halchter\nWF FFw Linden",
-    "address": "L495 WF-Halchter WF-Süd (07), L495",
+    "text": "B 2 - verdächtiger Rauch\nSondersignal: Ja\nEinsatzortzusatz: Bienenwald Bauwagen \nDatum: 20.07.2026\nZeit: 10:02:04\nEinsatznummer: 32423234\n\n----- Einheiten -----\n\nWF FFw Hometown\nWF FFw Leben",
+    "address": "L495 WF-Homeland WF-West (07), L495",
     "priority": 1
   }' | python3 -m json.tool 2>/dev/null || echo "(kein JSON)"
 
@@ -62,7 +62,7 @@ curl -s -X POST "${BASE}/api/divera" \
   -H "Content-Type: application/json" \
   -d '{
     "title": "H V U-1",
-    "text": "V U mit VP auslaufende Betriebsflüssigkeiten\n\n----- Einheiten -----\n\nWF 21-43-08\nWF 21-00-02",
+    "text": "V U mit VP auslaufende Betriebsflüssigkeiten\n\n----- Einheiten -----\n\nWF 11-99-22\nWF 88-77-66",
     "address": "A36-Richtung Braunschweig, A36 WF-Süd (07) Richtung WF-West (06)",
     "priority": 1
   }' | python3 -m json.tool 2>/dev/null || echo "(kein JSON)"
