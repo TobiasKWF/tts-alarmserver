@@ -9,19 +9,20 @@
 
 require('dotenv').config();
 
-const http       = require('http');
-const { createApp }        = require('./app');
-const config               = require('./config');
-const logger               = require('./utils/logger');
-const { initWebSocket }    = require('./services/websocketService');
-const { QueueService }     = require('./services/queueService');
-const { AlarmService }     = require('./services/alarmService');
-const eventBus             = require('./events/eventBus');
+const http                    = require('http');
+const { createApp }           = require('./app');
+const config                  = require('./config');
+const logger                  = require('./utils/logger');
+const { initWebSocket }       = require('./services/websocketService');
+const { initDashboardWS }     = require('./websocket/server');
+const { QueueService }        = require('./services/queueService');
+const { AlarmService }        = require('./services/alarmService');
+const eventBus                = require('./events/eventBus');
 
 let server = null;
 
 /**
- * Startet den HTTP-Server und alle abhängigen Services.
+ * Startet den HTTP-Server und alle abhaengigen Services.
  */
 async function start() {
   try {
@@ -29,8 +30,8 @@ async function start() {
     config.validate();
 
     logger.info('TTS-Alarmserver wird gestartet...', {
-      version: process.env.npm_package_version || '1.0.0',
-      nodeEnv: config.server.nodeEnv,
+      version:    process.env.npm_package_version || '1.0.0',
+      nodeEnv:    config.server.nodeEnv,
       nodeVersion: process.version,
     });
 
@@ -40,14 +41,17 @@ async function start() {
     // HTTP-Server erstellen
     server = http.createServer(app);
 
-    // WebSocket initialisieren (an HTTP-Server gebunden)
+    // WebSocket initialisieren (bestehend – REST/Alarm-Clients)
     initWebSocket(server);
+
+    // Dashboard-WebSocket initialisieren (v3.1 – Pfad: /ws/dashboard)
+    initDashboardWS(server);
 
     // Services initialisieren
     const queueService = QueueService.getInstance();
     const alarmService = AlarmService.getInstance();
 
-    // Queue-Worker starten (AlarmService wird als Worker übergeben)
+    // Queue-Worker starten (AlarmService wird als Worker uebergeben)
     queueService.startWorker(alarmService);
 
     // Server starten
@@ -60,14 +64,15 @@ async function start() {
       server.once('error', reject);
     });
 
-    const addr = server.address();
+    const addr        = server.address();
     const displayHost = config.server.host === '0.0.0.0' ? 'localhost' : config.server.host;
 
-    logger.info('TTS-Alarmserver läuft', {
-      host:      config.server.host,
-      port:      addr.port,
-      dashboard: `http://${displayHost}:${addr.port}/dashboard`,
-      pid:       process.pid,
+    logger.info('TTS-Alarmserver laeuft', {
+      host:        config.server.host,
+      port:        addr.port,
+      dashboard:   `http://${displayHost}:${addr.port}/dashboard`,
+      dashboardWS: `ws://${displayHost}:${addr.port}/ws/dashboard`,
+      pid:         process.pid,
     });
 
     eventBus.emit('server.started', { port: addr.port });
@@ -79,7 +84,7 @@ async function start() {
 }
 
 /**
- * Graceful Shutdown – beendet laufende Streams und schließt Verbindungen.
+ * Graceful Shutdown – beendet laufende Streams und schliesst Verbindungen.
  * @param {string} signal - Das empfangene Betriebssystem-Signal
  */
 async function shutdown(signal) {
@@ -96,7 +101,7 @@ async function shutdown(signal) {
     logger.warn('Fehler beim Stoppen der Queue', { error: err.message });
   }
 
-  // HTTP-Server schließen (keine neuen Verbindungen)
+  // HTTP-Server schliessen (keine neuen Verbindungen)
   if (server) {
     await new Promise((resolve) => {
       server.close(() => {
@@ -116,7 +121,7 @@ async function shutdown(signal) {
   process.exit(0);
 }
 
-// Signal-Handler für Graceful Shutdown
+// Signal-Handler fuer Graceful Shutdown
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
 

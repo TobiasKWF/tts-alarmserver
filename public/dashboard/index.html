@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TTS-Alarmserver Dashboard</title>
+  <link rel="stylesheet" href="/dashboard/dashboard.css" />
+</head>
+<body>
+  <header>
+    <h1>TTS-Alarmserver</h1>
+    <div class="header-right">
+      <span id="ws-status" class="badge badge--disconnected">Verbinde...</span>
+      <button id="theme-toggle" title="Dark/Light-Mode umschalten">🌙</button>
+    </div>
+  </header>
+
+  <main class="grid">
+
+    <!-- Serverstatus -->
+    <section class="card" id="card-status">
+      <h2>Serverstatus</h2>
+      <dl>
+        <dt>Uptime</dt>       <dd id="stat-uptime">–</dd>
+        <dt>RAM</dt>          <dd id="stat-ram">–</dd>
+        <dt>WS-Clients</dt>   <dd id="stat-ws">–</dd>
+      </dl>
+    </section>
+
+    <!-- Aktuelle Durchsage -->
+    <section class="card" id="card-speech">
+      <h2>Aktuelle Durchsage</h2>
+      <div id="speech-empty" class="empty">Keine aktive Durchsage</div>
+      <div id="speech-detail" class="hidden">
+        <p id="speech-text"></p>
+        <dl>
+          <dt>Alarm-ID</dt> <dd id="speech-alarm-id"></dd>
+          <dt>Stimme</dt>   <dd id="speech-voice"></dd>
+        </dl>
+        <div class="progress-wrap">
+          <div class="progress-bar" id="speech-progress"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Warteschlange -->
+    <section class="card" id="card-queue">
+      <h2>Warteschlange</h2>
+      <div id="queue-empty" class="empty">Warteschlange leer</div>
+      <table id="queue-table" class="hidden">
+        <thead><tr><th>Prio</th><th>ID</th><th>Quelle</th><th>Text</th></tr></thead>
+        <tbody id="queue-body"></tbody>
+      </table>
+    </section>
+
+    <!-- Alarmhistorie -->
+    <section class="card" id="card-history">
+      <h2>Alarmhistorie <small id="history-count"></small></h2>
+      <div id="history-empty" class="empty">Noch keine Eintraege</div>
+      <table id="history-table" class="hidden">
+        <thead><tr><th>Zeit</th><th>ID</th><th>Text</th><th>Status</th></tr></thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </section>
+
+    <!-- Fehlerlog -->
+    <section class="card" id="card-errors">
+      <h2>Fehlerlog <small id="error-count"></small></h2>
+      <div id="errors-empty" class="empty">Keine Fehler</div>
+      <ul id="errors-list" class="hidden"></ul>
+    </section>
+
+  </main>
+
+  <script src="/dashboard/dashboard.js"></script>
+</body>
+</html>

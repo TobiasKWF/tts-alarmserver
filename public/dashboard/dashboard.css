@@ -1,0 +1,186 @@
+/* ============================================================
+   TTS-Alarmserver Dashboard – v3.1
+   Dark/Light-Mode via [data-theme] auf <html>
+   ============================================================ */
+
+:root {
+  --bg:         #0f1117;
+  --bg-card:    #1a1d27;
+  --border:     #2e3248;
+  --text:       #e2e8f0;
+  --text-muted: #8892a4;
+  --accent:     #4f8ef7;
+  --success:    #34d399;
+  --warning:    #fbbf24;
+  --danger:     #f87171;
+  --radius:     10px;
+  --font:       'Segoe UI', system-ui, sans-serif;
+}
+
+[data-theme="light"] {
+  --bg:         #f0f2f7;
+  --bg-card:    #ffffff;
+  --border:     #d1d9e6;
+  --text:       #1a202c;
+  --text-muted: #64748b;
+  --accent:     #2563eb;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  min-height: 100vh;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: .02em; }
+
+.header-right { display: flex; align-items: center; gap: 12px; }
+
+#theme-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+/* Badges */
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.badge--connected    { background: #14532d; color: var(--success); }
+.badge--disconnected { background: #451a1a; color: var(--danger); }
+.badge--reconnecting { background: #451f00; color: var(--warning); }
+
+/* Grid Layout */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+  padding: 20px;
+}
+
+/* Cards */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  overflow: hidden;
+}
+
+.card h2 {
+  font-size: .85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+
+.card h2 small {
+  font-size: .75rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Definition list (Serverstatus) */
+dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; }
+dt { color: var(--text-muted); }
+dd { font-weight: 500; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--border);
+}
+td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: rgba(255,255,255,.03); }
+
+/* Progress bar */
+.progress-wrap {
+  margin-top: 12px;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  width: 0%;
+  transition: width .5s linear;
+}
+
+/* Empty states */
+.empty {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+/* Fehlerlog */
+#errors-list { list-style: none; }
+#errors-list li {
+  padding: 7px 10px;
+  margin-bottom: 6px;
+  background: rgba(248,113,113,.08);
+  border-left: 3px solid var(--danger);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+#errors-list li .err-time {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+/* Speech detail */
+#speech-detail p {
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+/* Prio badges in queue */
+.prio-high   { color: var(--danger);  font-weight: 700; }
+.prio-normal { color: var(--text-muted); }
+
+/* Utility */
+.hidden { display: none !important; }
