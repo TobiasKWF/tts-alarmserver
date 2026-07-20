@@ -1,115 +1,41 @@
 'use strict';
 
 /**
- * @file app.js
- * @description Express Application Factory.
+ * Express-Anwendung: Middleware, Routen und globale Fehlerbehandlung.
  */
 
 const express = require('express');
-const helmet  = require('helmet');
-const path    = require('path');
+const path = require('path');
+const requestLogger = require('./middleware/requestLogger');
+const errorHandler = require('./middleware/errorHandler');
+const alarmRoutes = require('./routes/alarm');
+const statusRoutes = require('./routes/status');
+const historyRoutes = require('./routes/history');
+const logger = require('./logging/logger');
 
-const config = require('./config');
-const logger = require('./utils/logger');
+const app = express();
 
-const {
-  requestId,
-  requestLogger,
-  errorHandler,
-  notFoundHandler,
-  apiKeyAuth,
-  globalLimiter,
-  announceLimiter,
-  diveraLimiter,
-  corsMiddleware,
-  sanitize,
-} = require('./middleware');
+// Body-Parser
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-const announceRouter = require('./routes/announce');
-const diveraRouter   = require('./routes/divera');
-const healthRouter   = require('./routes/health');
-const statsRouter    = require('./routes/stats');
-const voicesRouter   = require('./routes/voices');
+// Statische Dateien
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
-function createApp() {
-  const app = express();
+// Request-Logging
+app.use(requestLogger);
 
-  app.set('trust proxy', 1);
+// Routen
+app.use('/api/alarm', alarmRoutes);
+app.use('/api/status', statusRoutes);
+app.use('/api/history', historyRoutes);
 
-  app.use(corsMiddleware);
-  app.options('*', corsMiddleware);
+// 404
+app.use((req, res) => {
+  res.status(404).json({ error: 'Nicht gefunden', path: req.path });
+});
 
-  app.use(
-    helmet({
-      contentSecurityPolicy: {
-        useDefaults: false,          // Kein auto-append von upgrade-insecure-requests
-        directives: {
-          defaultSrc:  ["'self'"],
-          scriptSrc:   ["'self'", "'unsafe-inline'"],
-          styleSrc:    ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-          fontSrc:     ["'self'", 'data:', 'https://fonts.gstatic.com'],
-          connectSrc:  ["'self'", '*'],
-          imgSrc:      ["'self'", 'data:'],
-          objectSrc:   ["'none'"],
-          frameAncestors: ["'none'"],
-          // upgrade-insecure-requests BEWUSST WEGGELASSEN
-          // Server laeuft auf HTTP, kein HTTPS verfuegbar
-        },
-      },
-      crossOriginEmbedderPolicy: false,
-      // HSTS deaktivieren – kein HTTPS vorhanden
-      strictTransportSecurity: false,
-    })
-  );
+// Globale Fehlerbehandlung
+app.use(errorHandler);
 
-  app.use(express.json({ limit: '1mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-  app.use(sanitize);
-  app.use(requestId);
-  app.use(requestLogger);
-
-  app.use((req, res, next) => {
-    if (req.path === '/ws' || req.path.startsWith('/health')) return next();
-    return globalLimiter(req, res, next);
-  });
-
-  const staticOpts = { maxAge: 0, index: 'index.html' };
-  const publicDir  = path.join(__dirname, '..', 'public');
-
-  app.use('/',          express.static(publicDir, staticOpts));
-  app.use('/dashboard', express.static(publicDir, staticOpts));
-
-  app.use('/health',   healthRouter);
-  app.use('/stats',    statsRouter);
-  app.use('/announce', apiKeyAuth, announceLimiter, announceRouter);
-
-  app.post('/play-fanfare', apiKeyAuth, announceLimiter, (req, res, next) => {
-    req.url = '/fanfare';
-    announceRouter(req, res, next);
-  });
-
-  app.use('/divera', diveraLimiter, diveraRouter);
-  app.use('/voices', voicesRouter);
-  app.use('/voice',  voicesRouter);
-
-  app.use(notFoundHandler);
-  app.use(errorHandler);
-
-  logger.info('Express-App konfiguriert', {
-    env: config.server.nodeEnv,
-    routes: [
-      'GET  /  (Dashboard)',
-      'GET  /dashboard',
-      'GET  /health',
-      'GET  /stats',
-      'POST /announce',
-      'POST /play-fanfare',
-      'POST /divera',
-      'GET  /voices',
-    ],
-  });
-
-  return app;
-}
-
-module.exports = { createApp };
+module.exports = app;
