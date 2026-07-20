@@ -1,264 +1,297 @@
-/* TTS-Alarmserver Dashboard Client – v3.1 */
+/* global WebSocket */
 'use strict';
 
-(function () {
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+const WS_URL         = `ws://${location.host}/ws/dashboard`;
+const RECONNECT_BASE = 1000;
+const RECONNECT_MAX  = 30000;
+const FANFARE_FILE   = 'fanfare.wav';
 
-  // ── Konfiguration ──────────────────────────────────────────
-  const WS_URL          = `ws://${location.host}/ws/dashboard`;
-  const RECONNECT_INIT  = 1000;
-  const RECONNECT_MAX   = 30000;
-  const RECONNECT_FACTOR = 2;
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let ws              = null;
+let reconnectDelay  = RECONNECT_BASE;
+let reconnectTimer  = null;
+let uptimeBase      = null;   // Date.now() - uptime*1000
+let progressTimer   = null;
+let speechStartedAt = null;
+let speechDuration  = null;
+let fanfareTimer    = null;
 
-  // ── State ──────────────────────────────────────────────────
-  let ws            = null;
-  let reconnectDelay = RECONNECT_INIT;
-  let uptimeBase    = null;   // Server-Uptime bei letztem Snapshot (Sekunden)
-  let uptimeLocal   = null;   // lokaler Date.now() beim Empfang des Snapshots
-  let speechStart   = null;
-  let speechDur     = null;
-  let progressTimer = null;
+// ---------------------------------------------------------------------------
+// DOM helpers
+// ---------------------------------------------------------------------------
+const $  = id => document.getElementById(id);
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-  // ── DOM-Refs ───────────────────────────────────────────────
-  const $ = (id) => document.getElementById(id);
+// ---------------------------------------------------------------------------
+// Theme
+// ---------------------------------------------------------------------------
+const html = document.documentElement;
+const savedTheme = localStorage.getItem('dashboard-theme');
+if (savedTheme) html.dataset.theme = savedTheme;
 
-  const el = {
-    wsStatus:      $('ws-status'),
-    themeToggle:   $('theme-toggle'),
-    uptime:        $('stat-uptime'),
-    ram:           $('stat-ram'),
-    wsClients:     $('stat-ws'),
-    speechEmpty:   $('speech-empty'),
-    speechDetail:  $('speech-detail'),
-    speechText:    $('speech-text'),
-    speechAlarmId: $('speech-alarm-id'),
-    speechVoice:   $('speech-voice'),
-    speechProgress:$('speech-progress'),
-    queueEmpty:    $('queue-empty'),
-    queueTable:    $('queue-table'),
-    queueBody:     $('queue-body'),
-    historyEmpty:  $('history-empty'),
-    historyTable:  $('history-table'),
-    historyBody:   $('history-body'),
-    historyCount:  $('history-count'),
-    errorsEmpty:   $('errors-empty'),
-    errorsList:    $('errors-list'),
-    errorCount:    $('error-count'),
-  };
+$('theme-toggle').addEventListener('click', () => {
+  const next = html.dataset.theme === 'dark' ? 'light' : 'dark';
+  html.dataset.theme = next;
+  localStorage.setItem('dashboard-theme', next);
+  $('theme-toggle').textContent = next === 'dark' ? '\uD83C\uDF19' : '\u2600\uFE0F';
+});
 
-  // ── Dark/Light-Mode ────────────────────────────────────────
-  const html = document.documentElement;
-  const savedTheme = localStorage.getItem('dashboard-theme') || 'dark';
-  setTheme(savedTheme);
+// ---------------------------------------------------------------------------
+// Fanfare-Button
+// ---------------------------------------------------------------------------
+const btnFanfare      = $('btn-fanfare');
+const btnFanfareLabel = $('btn-fanfare-label');
 
-  el.themeToggle.addEventListener('click', () => {
-    const next = html.dataset.theme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-    localStorage.setItem('dashboard-theme', next);
+btnFanfare.addEventListener('click', async () => {
+  if (btnFanfare.disabled) return;
+  clearTimeout(fanfareTimer);
+  btnFanfare.disabled = true;
+  btnFanfare.className = 'btn-fanfare';
+  btnFanfareLabel.textContent = 'Spiele\u2026';
+
+  try {
+    const res = await fetch('/play-fanfare', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ file: FANFARE_FILE }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    btnFanfare.className = 'btn-fanfare state-ok';
+    btnFanfareLabel.textContent = '\u2713 Gestartet';
+  } catch (_) {
+    btnFanfare.className = 'btn-fanfare state-err';
+    btnFanfareLabel.textContent = '\u2717 Fehler';
+    btnFanfare.disabled = false;
+  }
+
+  fanfareTimer = setTimeout(() => {
+    btnFanfare.disabled = false;
+    btnFanfare.className = 'btn-fanfare';
+    btnFanfareLabel.textContent = 'Fanfare';
+  }, 2500);
+});
+
+// ---------------------------------------------------------------------------
+// WebSocket
+// ---------------------------------------------------------------------------
+function connect() {
+  ws = new WebSocket(WS_URL);
+
+  ws.addEventListener('open', () => {
+    setStatus('connected');
+    reconnectDelay = RECONNECT_BASE;
+    clearTimeout(reconnectTimer);
   });
 
-  function setTheme(theme) {
-    html.dataset.theme = theme;
-    el.themeToggle.textContent = theme === 'dark' ? '☀️' : '🌙';
+  ws.addEventListener('message', ({ data }) => {
+    try { handleMessage(JSON.parse(data)); } catch (_) {}
+  });
+
+  ws.addEventListener('close', () => {
+    setStatus('reconnecting');
+    scheduleReconnect();
+  });
+
+  ws.addEventListener('error', () => {
+    ws.close();
+  });
+}
+
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    connect();
+    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX);
+  }, reconnectDelay);
+}
+
+// ---------------------------------------------------------------------------
+// Message Handler
+// ---------------------------------------------------------------------------
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'snapshot':
+      applySnapshot(msg);
+      break;
+    case 'speech':
+      applySpeech(msg.payload);
+      break;
+    case 'speech:clear':
+      clearSpeech();
+      break;
+    case 'queue':
+      applyQueue(msg.payload);
+      break;
+    case 'history':
+      applyHistory(msg.payload);
+      break;
+    case 'error':
+      applyErrors(msg.payload);
+      break;
+    case 'server':
+      applyServer(msg.payload);
+      break;
   }
+}
 
-  // ── WebSocket + Auto-Reconnect ─────────────────────────────
-  function connect() {
-    setWsStatus('reconnecting');
-    ws = new WebSocket(WS_URL);
+// ---------------------------------------------------------------------------
+// Snapshot
+// ---------------------------------------------------------------------------
+function applySnapshot(snap) {
+  if (snap.server)       applyServer(snap.server);
+  if (snap.currentSpeech) applySpeech(snap.currentSpeech);
+  else                    clearSpeech();
+  if (snap.queue)        applyQueue(snap.queue);
+  if (snap.history)      applyHistory(snap.history);
+  if (snap.errors)       applyErrors(snap.errors);
+}
 
-    ws.onopen = () => {
-      reconnectDelay = RECONNECT_INIT;
-      setWsStatus('connected');
-    };
-
-    ws.onmessage = ({ data }) => {
-      try {
-        const msg = JSON.parse(data);
-        if (msg.type === 'snapshot') renderSnapshot(msg);
-        else                         applyPatch(msg);
-      } catch (e) {
-        console.warn('Dashboard WS parse error', e);
-      }
-    };
-
-    ws.onclose = () => {
-      setWsStatus('reconnecting');
-      setTimeout(connect, reconnectDelay);
-      reconnectDelay = Math.min(reconnectDelay * RECONNECT_FACTOR, RECONNECT_MAX);
-    };
-
-    ws.onerror = () => ws.close();
+// ---------------------------------------------------------------------------
+// Server stats
+// ---------------------------------------------------------------------------
+function applyServer(s) {
+  if (s.uptime != null) {
+    uptimeBase = Date.now() - s.uptime * 1000;
+    tickUptime();
   }
+  if (s.memory)      $('stat-ram').textContent   = (s.memory.heapUsedMB ?? s.memory) + ' MB';
+  if (s.wsClients != null) $('stat-ws').textContent = s.wsClients;
+}
 
-  function setWsStatus(state) {
-    el.wsStatus.className = `badge badge--${state}`;
-    el.wsStatus.textContent = {
-      connected:    'Verbunden',
-      disconnected: 'Getrennt',
-      reconnecting: 'Verbinde…',
-    }[state] || state;
+// Live-Uptime-Ticker
+setInterval(() => { if (uptimeBase != null) tickUptime(); }, 1000);
+function tickUptime() {
+  const secs = Math.floor((Date.now() - uptimeBase) / 1000);
+  $('stat-uptime').textContent = formatUptime(secs);
+}
+
+// ---------------------------------------------------------------------------
+// Speech
+// ---------------------------------------------------------------------------
+function applySpeech(sp) {
+  if (!sp) { clearSpeech(); return; }
+  $('speech-empty').classList.add('hidden');
+  $('speech-detail').classList.remove('hidden');
+  $('speech-text').textContent     = sp.text     || '';
+  $('speech-alarm-id').textContent = sp.alarmId  || '';
+  $('speech-voice').textContent    = sp.voice    || '';
+
+  // Fortschrittsbalken
+  clearInterval(progressTimer);
+  if (sp.startedAt && sp.durationMs) {
+    speechStartedAt = sp.startedAt;
+    speechDuration  = sp.durationMs;
+    progressTimer = setInterval(() => {
+      const pct = Math.min(100, (Date.now() - speechStartedAt) / speechDuration * 100);
+      $('speech-progress').style.width = pct + '%';
+      if (pct >= 100) clearInterval(progressTimer);
+    }, 200);
   }
+}
 
-  // ── Snapshot (vollstaendiger State) ────────────────────────
-  function renderSnapshot(snap) {
-    uptimeBase  = snap.uptime;
-    uptimeLocal = Date.now();
-    renderUptime();
-    renderRam();
-    el.wsClients.textContent = snap.wsClients;
-    renderSpeech(snap.currentSpeech);
-    renderQueue(snap.queue);
-    renderHistory(snap.history);
-    renderErrors(snap.errors);
-    startUptimeTick();
+function clearSpeech() {
+  clearInterval(progressTimer);
+  $('speech-progress').style.width = '0%';
+  $('speech-detail').classList.add('hidden');
+  $('speech-empty').classList.remove('hidden');
+}
+
+// ---------------------------------------------------------------------------
+// Queue
+// ---------------------------------------------------------------------------
+function applyQueue(items) {
+  const body = $('queue-body');
+  if (!items || items.length === 0) {
+    $('queue-table').classList.add('hidden');
+    $('queue-empty').classList.remove('hidden');
+    return;
   }
+  $('queue-empty').classList.add('hidden');
+  $('queue-table').classList.remove('hidden');
+  body.innerHTML = items.map(it => `
+    <tr>
+      <td class="${it.priority <= 2 ? 'prio-high' : 'prio-normal'}">${esc(it.priority ?? 5)}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${esc((it.id || '').slice(0,8))}</td>
+      <td>${esc(it.source || 'api')}</td>
+      <td>${esc(it.text  || '')}</td>
+    </tr>
+  `).join('');
+}
 
-  // ── Delta-Patches ──────────────────────────────────────────
-  function applyPatch(msg) {
-    switch (msg.type) {
-      case 'speech':  renderSpeech(msg.payload);  break;
-      case 'queue':   renderQueue(msg.payload);   break;
-      case 'history': renderHistory(msg.payload); break;
-      case 'error':   renderErrors(msg.payload);  break;
-    }
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+function applyHistory(items) {
+  const body = $('history-body');
+  if (!items || items.length === 0) {
+    $('history-table').classList.add('hidden');
+    $('history-empty').classList.remove('hidden');
+    $('history-count').textContent = '';
+    return;
   }
+  $('history-empty').classList.add('hidden');
+  $('history-table').classList.remove('hidden');
+  $('history-count').textContent = `(${items.length})`;
+  body.innerHTML = items.slice().reverse().map(it => {
+    const ok   = it.success !== false;
+    const time = it.finishedAt ? new Date(it.finishedAt).toLocaleTimeString('de-DE') : '';
+    return `<tr>
+      <td style="white-space:nowrap;font-size:12px;color:var(--text-muted)">${esc(time)}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${esc((it.alarmId||'').slice(0,8))}</td>
+      <td>${esc(it.text || '')}</td>
+      <td style="color:${ok ? 'var(--success)' : 'var(--danger)'}">${ok ? '\u2713' : '\u2717'}</td>
+    </tr>`;
+  }).join('');
+}
 
-  // ── Uptime-Ticker ──────────────────────────────────────────
-  let uptimeTick = null;
-
-  function startUptimeTick() {
-    if (uptimeTick) clearInterval(uptimeTick);
-    uptimeTick = setInterval(renderUptime, 1000);
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+function applyErrors(items) {
+  const list = $('errors-list');
+  if (!items || items.length === 0) {
+    list.classList.add('hidden');
+    $('errors-empty').classList.remove('hidden');
+    $('error-count').textContent = '';
+    return;
   }
+  $('errors-empty').classList.add('hidden');
+  list.classList.remove('hidden');
+  $('error-count').textContent = `(${items.length})`;
+  list.innerHTML = items.slice().reverse().map(it => {
+    const time = it.ts ? new Date(it.ts).toLocaleTimeString('de-DE') : '';
+    return `<li><span class="err-time">${esc(time)}</span>${esc(it.message || it.error || String(it))}</li>`;
+  }).join('');
+}
 
-  function renderUptime() {
-    if (uptimeBase === null) return;
-    const seconds = uptimeBase + Math.floor((Date.now() - uptimeLocal) / 1000);
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    el.uptime.textContent = `${pad(h)}:${pad(m)}:${pad(s)}`;
-  }
+// ---------------------------------------------------------------------------
+// WS Status Badge
+// ---------------------------------------------------------------------------
+function setStatus(state) {
+  const el = $('ws-status');
+  el.className = 'badge badge--' + state;
+  el.textContent = { connected: 'Verbunden', reconnecting: 'Verbinde...', disconnected: 'Getrennt' }[state] || state;
+}
 
-  function renderRam() {
-    // RAM wird nicht per WS gepusht – Platzhalter fuer zukuenftige Erweiterung
-    el.ram.textContent = '–';
-  }
+// ---------------------------------------------------------------------------
+// Utils
+// ---------------------------------------------------------------------------
+function formatUptime(s) {
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m ${sec}s`;
+  return `${m}m ${sec}s`;
+}
 
-  function pad(n) { return String(n).padStart(2, '0'); }
-
-  // ── Speech ─────────────────────────────────────────────────
-  function renderSpeech(speech) {
-    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
-
-    if (!speech) {
-      el.speechEmpty.classList.remove('hidden');
-      el.speechDetail.classList.add('hidden');
-      el.speechProgress.style.width = '0%';
-      speechStart = null;
-      speechDur   = null;
-      return;
-    }
-
-    el.speechEmpty.classList.add('hidden');
-    el.speechDetail.classList.remove('hidden');
-    el.speechText.textContent    = speech.text    || '–';
-    el.speechAlarmId.textContent = speech.alarmId || '–';
-    el.speechVoice.textContent   = speech.voice   || '–';
-
-    speechStart = speech.startedAt || Date.now();
-    speechDur   = speech.durationMs || null;
-
-    if (speechDur) {
-      progressTimer = setInterval(() => {
-        const elapsed = Date.now() - speechStart;
-        const pct = Math.min(100, (elapsed / speechDur) * 100);
-        el.speechProgress.style.width = pct + '%';
-        if (pct >= 100) { clearInterval(progressTimer); progressTimer = null; }
-      }, 200);
-    }
-  }
-
-  // ── Queue ──────────────────────────────────────────────────
-  function renderQueue(queue) {
-    if (!queue || queue.length === 0) {
-      el.queueEmpty.classList.remove('hidden');
-      el.queueTable.classList.add('hidden');
-      return;
-    }
-    el.queueEmpty.classList.add('hidden');
-    el.queueTable.classList.remove('hidden');
-    el.queueBody.innerHTML = queue.map(item => {
-      const prioClass = item.priority >= 10 ? 'prio-high' : 'prio-normal';
-      return `<tr>
-        <td class="${prioClass}">${esc(String(item.priority ?? '–'))}</td>
-        <td>${esc(item.id      ?? '–')}</td>
-        <td>${esc(item.source  ?? '–')}</td>
-        <td>${esc(truncate(item.text, 60))}</td>
-      </tr>`;
-    }).join('');
-  }
-
-  // ── History ────────────────────────────────────────────────
-  function renderHistory(history) {
-    el.historyCount.textContent = history && history.length ? `(${history.length})` : '';
-    if (!history || history.length === 0) {
-      el.historyEmpty.classList.remove('hidden');
-      el.historyTable.classList.add('hidden');
-      return;
-    }
-    el.historyEmpty.classList.add('hidden');
-    el.historyTable.classList.remove('hidden');
-    el.historyBody.innerHTML = history.map(entry => {
-      const ts     = entry.finishedAt ? formatTime(entry.finishedAt) : '–';
-      const status = entry.success ? '✅' : '❌';
-      return `<tr>
-        <td>${esc(ts)}</td>
-        <td>${esc(entry.alarmId ?? '–')}</td>
-        <td>${esc(truncate(entry.text, 60))}</td>
-        <td>${status}</td>
-      </tr>`;
-    }).join('');
-  }
-
-  // ── Errors ─────────────────────────────────────────────────
-  function renderErrors(errors) {
-    el.errorCount.textContent = errors && errors.length ? `(${errors.length})` : '';
-    if (!errors || errors.length === 0) {
-      el.errorsEmpty.classList.remove('hidden');
-      el.errorsList.classList.add('hidden');
-      return;
-    }
-    el.errorsEmpty.classList.add('hidden');
-    el.errorsList.classList.remove('hidden');
-    el.errorsList.innerHTML = errors.map(err => `
-      <li>
-        <span class="err-time">${esc(formatTime(err.ts))}</span>
-        ${esc(err.message)}
-      </li>
-    `).join('');
-  }
-
-  // ── Helpers ────────────────────────────────────────────────
-  function esc(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  function truncate(str, max) {
-    if (!str) return '';
-    return str.length > max ? str.slice(0, max) + '…' : str;
-  }
-
-  function formatTime(ts) {
-    if (!ts) return '–';
-    return new Date(ts).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  }
-
-  // ── Start ──────────────────────────────────────────────────
-  connect();
-
-})();
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+connect();
