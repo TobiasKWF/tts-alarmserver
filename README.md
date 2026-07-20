@@ -1,78 +1,152 @@
 # tts-alarmserver
 
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-brightgreen)](https://nodejs.org)
+[![Version](https://img.shields.io/badge/version-3.0.0-blue)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-active--development-orange)](#)
+[![Status](https://img.shields.io/badge/status-production--ready-brightgreen)](#)
 
-Modularer Open-Source-Alarmserver für **Feuerwehr, THW, Rettungsdienst, Werkfeuerwehren, Vereine und Unternehmen**.
+Modularer Open-Source-Alarmserver für **Feuerwehr, THW, Rettungsdienst, Werkfeuerwehren und Vereine**.
 
-Erzeugt Sprachausgaben mit **Piper TTS** und streamt diese per **RTP (via ffmpeg)** an Lautsprecheranlagen – mit priorisierter Warteschlange, Live-Dashboard und REST API.
+Erzeugt Sprachausgaben mit **Piper TTS** und streamt diese per **RTP (via ffmpeg)** an Lautsprecheranlagen.
+Die Durchsage enthält **ausschließlich** Alarmstichwort und Einsatzort – alle Metadaten werden automatisch herausgefiltert.
 
 ---
 
 ## Inhaltsverzeichnis
 
 - [Features](#features)
+- [Durchsage-Beispiel](#durchsage-beispiel)
 - [Architektur](#architektur)
+- [Projektstruktur](#projektstruktur)
 - [Voraussetzungen](#voraussetzungen)
-- [Installation (Debian/Ubuntu)](#installation-debianubuntu)
+- [Installation](#installation)
 - [Konfiguration](#konfiguration)
 - [Start](#start)
 - [REST API](#rest-api)
-- [Dashboard](#dashboard)
-- [Feuerwehr-Normalisierung](#feuerwehr-normalisierung)
-- [Divera 24/7 Integration](#divera-247-integration)
+- [Sprachoptimierung](#sprachoptimierung)
 - [Logging](#logging)
 - [systemd Service](#systemd-service)
-- [Entwicklung](#entwicklung)
-- [Projektstruktur](#projektstruktur)
 - [Lizenz](#lizenz)
 
 ---
 
 ## Features
 
-- 🔊 **Piper TTS** – hochwertige deutsche Sprachsynthese, mehrere Stimmen
-- 📡 **RTP-Streaming** – Multicast und Unicast via ffmpeg, G.711/Opus
-- 📋 **Priorisierte Queue** – Alarmierungen laufen asynchron, HTTP 202 sofort
-- 🖥️ **Live-Dashboard** – WebSocket, Dark Mode, Alarmhistorie, Queue-Anzeige
-- 🚒 **Feuerwehr-Normalisierung** – `HH1 → Hilfeleistung eins`, `BAB → Bundesautobahn` usw.
-- 🔗 **Divera 24/7** – Webhook-Empfang für automatische Alarmierungen
-- 📊 **REST API** – `/announce`, `/divera`, `/health`, `/stats`, `/voices`
-- 🔑 **API-Key-Schutz** – optionaler Bearer-Token für alle Schreibendpunkte
-- 📝 **Winston Logging** – JSON, Rotation, Request-IDs, separates Error-Log
-- ⚡ **Event-System** – lose Kopplung aller Komponenten via EventEmitter
+- 🔊 **Piper TTS** – hochwertige deutsche Sprachsynthese (Thorsten-Stimme)
+- 📡 **RTP-Streaming** – Multicast und Unicast via ffmpeg, G.711 µ-law
+- 🚒 **Intelligente Alarmtext-Bereinigung** – nur Alarmstichwort + Einsatzort werden gesprochen
+- 🗣️ **Sprachoptimierung** – `B2 → Brand zwei`, `A39 → Autobahn neununddreißig`, `Str. → Straße`
+- 🔢 **Zahlenkonvertierung** – `43 → dreiundvierzig`, `105 → einhundertfünf`
+- 🔤 **Unicode-Reparatur** – Windows-1252-Fehlkodierungen, Zero-Width-Zeichen, NFC-Normalisierung
+- 📋 **Serialisierungsqueue** – Alarmierungen laufen nacheinander, kein Audio-Überlapp
+- 📝 **Strukturiertes Logging** – Request-ID, Dauer, bereinigter/gesprochener Text pro Alarm
+- 🛡️ **Fehlertoleranz** – Timeouts auf allen externen Prozessen, kein Server-Absturz bei Einzelfehlern
+- 📊 **REST API** – `/api/alarm`, `/api/status`, `/api/history`
+
+---
+
+## Durchsage-Beispiel
+
+Eingehender Rohalarmtext:
+
+```
+B2 Verdächtiger Rauch
+
+Sondersignal: Ja
+Datum: 20.07.2026
+Zeit: 10:02
+
+Einheiten:
+WF 21-43-8
+WF 21-41-2
+
+Ort:
+Oderwald Bauwagen Kindergarten
+```
+
+Resultierende Durchsage:
+
+```
+Brand zwei. Einsatzort: Oderwald Bauwagen Kindergarten.
+```
+
+Mehr wird **nicht** gesprochen.
 
 ---
 
 ## Architektur
 
 ```
-HTTP-Request
-    │
-    ▼
- Routes (Express)
-    │
-    ▼
- AlarmService          ← Normalisierung, Validierung, Gong
-    │
-    ▼
- QueueService          ← Priorisierte Warteschlange
-    │
-    ▼
- PiperService          ← TTS-Synthese → WAV-Datei
-    │
-    ▼
- FFmpegService         ← WAV → RTP-Stream
-    │
-    ▼
- RTP (Multicast/Unicast)
-
-EventBus: tts.started · tts.finished · stream.started · stream.finished
-          alarm.received · alarm.finished · queue.changed · server.started
+HTTP POST /api/alarm
+        │
+        ▼
+  alarmCleaner.js       ← Alarmtext bereinigen (nur Stichwort + Ort)
+        │
+        ▼
+  speechEnhancer.js     ← Unicode · Alarm-Codes · Straßen · Abkürzungen · Zahlen
+        │
+        ▼
+  queueService.js       ← Serialisierung (Concurrency = 1)
+        │
+        ▼
+  piperService.js       ← Text → WAV (mit Timeout + intelligentem Chunk-Split)
+        │
+        ▼
+  ffmpegService.js      ← WAV-Merge + RTP-Konvertierung (G.711 µ-law)
+        │
+        ▼
+  rtpStreamer.js        ← RTP-Stream an Lautsprecheranlage
+        │
+        ▼
+  alarmLog.js           ← Protokollierung: requestId · Dauer · Texte · Status
 ```
 
-Alle Komponenten sind **lose gekoppelt** und kommunizieren über den zentralen `EventBus`. Dashboard, Logger und Alarmhistorie reagieren ausschließlich auf Events.
+---
+
+## Projektstruktur
+
+```
+tts-alarmserver/
+├── server.js                        # Einstiegspunkt, SIGTERM/SIGINT-Handling
+├── src/
+│   ├── app.js                       # Express-Setup, Middleware-Chain
+│   ├── config/
+│   │   └── index.js                 # Zentrale Konfiguration (.env)
+│   ├── logging/
+│   │   ├── logger.js                # Schlankes strukturiertes Logging
+│   │   └── alarmLog.js              # Alarm-spezifisches Protokoll
+│   ├── tts/
+│   │   ├── alarmCleaner.js          # Regelbasierte Alarmtext-Bereinigung
+│   │   ├── speechEnhancer.js        # TTS-Optimierungspipeline
+│   │   └── mappings/
+│   │       ├── alarmMapping.js      # B2 → "Brand zwei", TH1 → "Technische Hilfe eins"
+│   │       └── roadMapping.js       # A2 → "Autobahn zwei", Str. → "Straße"
+│   ├── utils/
+│   │   ├── unicode.js               # NFC, Win-1252-Reparatur, Steuerzeichen
+│   │   ├── numbers.js               # 43 → "dreiundvierzig"
+│   │   ├── textSplitter.js          # Intelligente Aufteilung (kein slice!)
+│   │   ├── tempFiles.js             # Temp-Datei-Verwaltung mit Cleanup
+│   │   └── requestId.js             # Eindeutige Request-IDs
+│   ├── services/
+│   │   ├── alarmService.js          # Haupt-Orchestrierung der Pipeline
+│   │   ├── piperService.js          # Piper TTS mit Timeout
+│   │   ├── ffmpegService.js         # WAV-Merge + RTP-Konvertierung
+│   │   ├── historyService.js        # In-Memory Alarmhistorie
+│   │   └── queueService.js          # Serialisierungsqueue, 429 bei Überlauf
+│   ├── streaming/
+│   │   └── rtpStreamer.js            # RTP-Streaming via ffmpeg
+│   ├── routes/
+│   │   ├── alarm.js                 # POST /api/alarm
+│   │   ├── status.js                # GET /api/status
+│   │   └── history.js               # GET /api/history
+│   └── middleware/
+│       ├── requestLogger.js         # Request-Logging
+│       └── errorHandler.js          # Globale Fehlerbehandlung
+├── public/                          # Statische Web-Dateien
+├── .env.example                     # Konfigurationsvorlage
+├── package.json
+└── README.md
+```
 
 ---
 
@@ -81,14 +155,13 @@ Alle Komponenten sind **lose gekoppelt** und kommunizieren über den zentralen `
 | Komponente | Version | Hinweis |
 |---|---|---|
 | Node.js | ≥ 20 LTS | `node --version` |
-| npm | ≥ 10 | `npm --version` |
-| Piper | aktuell | [piper-tts/piper](https://github.com/rhasspy/piper) |
+| Piper | aktuell | [rhasspy/piper](https://github.com/rhasspy/piper) |
 | ffmpeg | ≥ 4.x | `apt install ffmpeg` |
 | Voice-Modell | `.onnx` + `.onnx.json` | [Piper Voices](https://github.com/rhasspy/piper/releases) |
 
 ---
 
-## Installation (Debian/Ubuntu)
+## Installation
 
 ### 1. Repository klonen
 
@@ -107,7 +180,6 @@ sudo apt update && sudo apt install -y ffmpeg
 ### 3. Piper installieren
 
 ```bash
-# Aktuelle Version von https://github.com/rhasspy/piper/releases herunterladen
 wget https://github.com/rhasspy/piper/releases/latest/download/piper_linux_x86_64.tar.gz
 tar -xzf piper_linux_x86_64.tar.gz
 sudo mv piper/piper /usr/local/bin/piper
@@ -118,50 +190,44 @@ piper --version
 ### 4. Voice-Modell herunterladen
 
 ```bash
-mkdir -p voices
-# Beispiel: Thorsten (Deutsch)
-wget -P voices/ https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/high/de_DE-thorsten-high.onnx
-wget -P voices/ https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/high/de_DE-thorsten-high.onnx.json
+mkdir -p /opt/piper/models
+wget -P /opt/piper/models/ https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/high/de_DE-thorsten-high.onnx
+wget -P /opt/piper/models/ https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/high/de_DE-thorsten-high.onnx.json
 ```
 
 ### 5. Konfiguration
 
 ```bash
 cp .env.example .env
-nano .env   # Werte anpassen
-```
-
-Mindest-Konfiguration:
-
-```env
-PIPER_BINARY=/usr/local/bin/piper
-PIPER_VOICES_DIR=/pfad/zu/voices
-FFMPEG_BINARY=/usr/bin/ffmpeg
-RTP_HOST=239.255.0.1
-RTP_PORT=5004
+nano .env
 ```
 
 ---
 
 ## Konfiguration
 
-Alle Einstellungen werden über Umgebungsvariablen in `.env` gesetzt.  
-Vollständige Referenz: [`.env.example`](.env.example)
+Alle Einstellungen in `.env`. Vollständige Referenz: [`.env.example`](.env.example)
 
 | Variable | Standard | Beschreibung |
 |---|---|---|
 | `PORT` | `3000` | HTTP-Port |
-| `API_KEY` | leer | Bearer-Token für geschützte Endpunkte |
+| `HOST` | `0.0.0.0` | Bind-Adresse |
 | `PIPER_BINARY` | `/usr/local/bin/piper` | Pfad zur Piper-Binary |
-| `PIPER_VOICES_DIR` | `./voices` | Verzeichnis mit `.onnx`-Dateien |
-| `PIPER_DEFAULT_VOICE` | `de_DE-thorsten-high` | Standard-Stimme |
-| `FFMPEG_BINARY` | `/usr/bin/ffmpeg` | Pfad zur ffmpeg-Binary |
-| `RTP_HOST` | `239.255.0.1` | Ziel-IP (Multicast oder Unicast) |
+| `PIPER_MODEL` | `/opt/piper/models/de_DE-thorsten-high.onnx` | Voice-Modell |
+| `PIPER_MAX_CHUNK` | `500` | Max. Zeichen pro TTS-Chunk |
+| `PIPER_TIMEOUT_MS` | `30000` | Timeout für Piper (ms) |
+| `FFMPEG_BINARY` | `ffmpeg` | Pfad zu ffmpeg |
+| `FFMPEG_TIMEOUT_MS` | `60000` | Timeout für ffmpeg (ms) |
+| `RTP_HOST` | `239.0.0.1` | Ziel-IP (Multicast oder Unicast) |
 | `RTP_PORT` | `5004` | Ziel-Port |
-| `RTP_CODEC` | `libopus` | Audio-Codec (`libopus`, `pcm_mulaw`) |
-| `RTP_TTL` | `32` | Multicast TTL |
-| `QUEUE_MAX_SIZE` | `50` | Maximale Warteschlangengröße |
-| `LOG_LEVEL` | `info` | `error`\|`warn`\|`info`\|`http`\|`debug` |
+| `RTP_CODEC` | `pcm_mulaw` | Audio-Codec (G.711) |
+| `RTP_SAMPLE_RATE` | `8000` | Sample-Rate (Hz) |
+| `RTP_CHANNELS` | `1` | Kanäle (Mono) |
+| `TMP_DIR` | `/tmp/tts-alarm` | Verzeichnis für temporäre Dateien |
+| `QUEUE_CONCURRENCY` | `1` | Parallele Alarmierungen |
+| `QUEUE_MAX_SIZE` | `20` | Max. Warteschlangengröße |
+| `HISTORY_MAX_ENTRIES` | `100` | Max. Einträge in der Alarmhistorie |
+| `LOG_LEVEL` | `info` | `error`\|`warn`\|`info`\|`debug` |
 
 ---
 
@@ -171,232 +237,130 @@ Vollständige Referenz: [`.env.example`](.env.example)
 # Produktion
 npm start
 
-# Entwicklung (mit Auto-Reload)
+# Entwicklung (mit Auto-Reload, Node.js ≥ 18)
 npm run dev
-
-# Dashboard öffnen
-open http://localhost:3000/dashboard
 ```
 
 ---
 
 ## REST API
 
-### POST /announce
+### POST /api/alarm
 
-Sprachausgabe in die Queue einstellen.
-
-**Header:** `Authorization: Bearer <API_KEY>` (wenn `API_KEY` gesetzt)
+Alarmtext senden und Durchsage auslösen.
 
 ```http
-POST /announce
+POST /api/alarm
 Content-Type: application/json
 
 {
-  "text": "Achtung, Feuerwehr ausgerückt zu: Hauptstraße 5",
-  "voice": "de_DE-thorsten-high",
-  "priority": 8,
-  "gong": true,
-  "normalize": true
+  "text": "B2 Verdächtiger Rauch\n\nSondersignal: Ja\nDatum: 20.07.2026\n\nOrt:\nOderwald Bauwagen Kindergarten"
 }
 ```
 
-**Antwort:** `202 Accepted`
+**Antwort:** `200 OK`
 ```json
 {
-  "status": "queued",
-  "alarmId": "a1b2c3d4-...",
-  "queuePosition": 1,
-  "estimatedWait": 0
+  "requestId": "a3f9c1",
+  "success": true,
+  "cleanText": "Brand zwei. Einsatzort: Oderwald Bauwagen Kindergarten.",
+  "spokenText": "Brand zwei. Einsatzort: Oderwald Bauwagen Kindergarten."
 }
 ```
 
-| Feld | Typ | Pflicht | Beschreibung |
-|---|---|---|---|
-| `text` | string | ✅ | Anzusagender Text (max. 2000 Zeichen) |
-| `voice` | string | – | Stimme (Standard aus `PIPER_DEFAULT_VOICE`) |
-| `priority` | 1–10 | – | Priorität (Standard: 5) |
-| `gong` | boolean | – | Gong vor Durchsage abspielen |
-| `normalize` | boolean | – | Feuerwehr-Normalisierung anwenden |
+Der Body kann auch als `{ "alarmtext": "..." }` oder als Plain-Text übergeben werden.
 
 ---
 
-### POST /divera
-
-Divera 24/7 Webhook-Empfänger.
+### GET /api/status
 
 ```http
-POST /divera
-Content-Type: application/json
-
-{
-  "title": "B2 – Wohnungsbrand",
-  "text": "Musterstraße 12, 12345 Musterstadt",
-  "priority": 9
-}
-```
-
----
-
-### POST /play-fanfare
-
-Fanfare/Gong-Datei abspielen.
-
-```http
-POST /play-fanfare
-Content-Type: application/json
-
-{
-  "file": "fanfare.wav",
-  "priority": 7
-}
-```
-
----
-
-### GET /health
-
-Healthcheck für Monitoring und Load-Balancer.
-
-```http
-GET /health
+GET /api/status
 ```
 
 ```json
 {
   "status": "ok",
-  "uptime": 3600,
-  "version": "1.0.0"
+  "version": "3.0.0",
+  "uptimeMs": 36000,
+  "queue": {
+    "running": 0,
+    "waiting": 0,
+    "maxConcurrency": 1,
+    "maxSize": 20
+  }
 }
 ```
 
 ---
 
-### GET /stats
-
-Aktuelle Laufzeitstatistiken.
+### GET /api/history
 
 ```http
-GET /stats
+GET /api/history?limit=10
 ```
 
-```json
-{
-  "status": "ok",
-  "uptime": 3600,
-  "totalAlarms": 42,
-  "totalErrors": 0,
-  "queue": { "size": 0, "maxSize": 50 },
-  "memory": { "heapUsedMB": 45 },
-  "rtp": { "host": "239.255.0.1", "port": 5004 }
-}
-```
+Gibt die letzten N Alarmierungen zurück (max. 100).
 
 ---
 
-### GET /stats/history
+## Sprachoptimierung
 
-Alarmhistorie (letzte 100 Einträge).
-
-```http
-GET /stats/history
-```
-
----
-
-### GET /voices
-
-Verfügbare Stimmen auflisten.
-
-```http
-GET /voices
-```
-
----
-
-### POST /voice
-
-Stimme wechseln (Laufzeit).
-
-```http
-POST /voice
-Content-Type: application/json
-
-{ "voice": "de_DE-kerstin-high" }
-```
-
----
-
-## Dashboard
-
-Das Live-Dashboard ist erreichbar unter:
-
-```
-http://localhost:3000/dashboard
-```
-
-Funktionen:
-- **Serverstatus** – Uptime, RAM, WebSocket-Verbindungen
-- **Aktuelle Durchsage** – Text, Alarm-ID, Stimme, Fortschrittsbalken
-- **Warteschlange** – Live-Liste mit Priorität und Quelle
-- **Alarmhistorie** – letzte 50 Einträge mit Status
-- **Fehlerlog** – letzte 20 Fehler
-- **Dark/Light-Mode** – umschaltbar
-- **Auto-Reconnect** – WebSocket mit exponentiellem Backoff
-
----
-
-## Feuerwehr-Normalisierung
-
-Der `NormalizationService` wandelt Kürzel in gesprochene Sprache um:
+### Alarmstichworte (`tts/mappings/alarmMapping.js`)
 
 | Eingabe | Ausgabe |
 |---|---|
-| `HH1` | Hilfeleistung eins |
-| `F2` | Feuer zwei |
-| `THL` | Technische Hilfeleistung |
-| `RD` | Rettungsdienst |
-| `THW` | Technisches Hilfswerk |
-| `POL` | Polizei |
-| `BAB` | Bundesautobahn |
-| `AS` | Anschlussstelle |
-| `A36` | Autobahn sechsunddreißig |
-| `L495` | Landesstraße vierhundertfünfundneunzig |
-| `10-15` | zehn bis fünfzehn |
+| `B1` | Brand eins |
+| `B2` | Brand zwei |
+| `TH1` | Technische Hilfe eins |
+| `TH2` | Technische Hilfe zwei |
+| `MANV1` | Massenanfall von Verletzten eins |
+| `ABC1` | ABC-Lage eins |
 
-Regeln sind in `src/config/normalization-rules.json` definiert und jederzeit erweiterbar.
+Erweiterungen direkt in `alarmMapping.js` eintragen – kein Code-Eingriff nötig.
 
----
+### Straßen & Abkürzungen (`tts/mappings/roadMapping.js`)
 
-## Divera 24/7 Integration
+| Eingabe | Ausgabe |
+|---|---|
+| `A2` | Autobahn zwei |
+| `A39` | Autobahn neununddreißig |
+| `B6` | Bundesstraße sechs |
+| `L615` | Landesstraße sechshundertfünfzehn |
+| `K53` | Kreisstraße dreiundfünfzig |
+| `Str.` | Straße |
+| `HsNr.` | Hausnummer |
+| `km` | Kilometer |
+| `ca.` | circa |
+| `OG2` | Obergeschoss zwei |
 
-In Divera 24/7 unter **Einstellungen → Alarmierung → Webhook** eintragen:
+### Zahlen (`utils/numbers.js`)
 
-```
-https://ihr-server:3000/divera
-```
-
-Optional: Divera-Zugangsdaten für aktive API-Abfragen in `.env`:
-
-```env
-DIVERA_BASE_URL=https://www.divera247.com/api/v2
-DIVERA_ACCESS_TOKEN=ihr-token
-```
+| Eingabe | Ausgabe |
+|---|---|
+| `2` | zwei |
+| `12` | zwölf |
+| `43` | dreiundvierzig |
+| `105` | einhundertfünf |
 
 ---
 
 ## Logging
 
-Log-Dateien werden in `LOG_DIR` (Standard: `./logs`) gespeichert:
+Jede Alarmierung erzeugt einen strukturierten Log-Eintrag:
 
-| Datei | Inhalt |
-|---|---|
-| `server.log` | Alle Events ab konfiguriertem Level |
-| `error.log` | Nur Fehler (level: error) |
-| `requests.log` | HTTP-Requests mit Request-ID |
+```json
+{
+  "requestId": "a3f9c1",
+  "durationMs": 1423,
+  "success": true,
+  "cleanText": "Brand zwei. Einsatzort: Oderwald Bauwagen Kindergarten.",
+  "spokenText": "Brand zwei. Einsatzort: Oderwald Bauwagen Kindergarten.",
+  "error": null
+}
+```
 
-Alle Logs im **JSON-Format** mit `timestamp`, `level`, `message` und strukturierten Feldern.  
-Rotation: täglich, max. `LOG_MAX_FILES` Dateien à `LOG_MAX_SIZE`.
+Log-Level über `LOG_LEVEL` in `.env` steuerbar: `error | warn | info | debug`
 
 ---
 
@@ -405,14 +369,14 @@ Rotation: täglich, max. `LOG_MAX_FILES` Dateien à `LOG_MAX_SIZE`.
 ```ini
 # /etc/systemd/system/tts-alarmserver.service
 [Unit]
-Description=TTS-Alarmserver
+Description=TTS-Alarmserver v3
 After=network.target
 
 [Service]
 Type=simple
 User=tts
 WorkingDirectory=/opt/tts-alarmserver
-ExecStart=/usr/bin/node src/server.js
+ExecStart=/usr/bin/node server.js
 Restart=on-failure
 RestartSec=5
 EnvironmentFile=/opt/tts-alarmserver/.env
@@ -428,83 +392,6 @@ sudo systemctl daemon-reload
 sudo systemctl enable tts-alarmserver
 sudo systemctl start tts-alarmserver
 sudo systemctl status tts-alarmserver
-```
-
----
-
-## Entwicklung
-
-```bash
-# Entwicklungsserver mit Auto-Reload
-npm run dev
-
-# Tests
-npm test
-
-# Tests mit Coverage
-npm run test:coverage
-
-# Linting
-npm run lint
-npm run lint:fix
-```
-
----
-
-## Projektstruktur
-
-```
-tts-alarmserver/
-├── src/
-│   ├── server.js              # Einstiegspunkt, HTTP-Server, Graceful Shutdown
-│   ├── app.js                 # Express Application Factory
-│   ├── config.js              # Zentrale Konfiguration (ENV-Variablen)
-│   ├── config/
-│   │   ├── index.js           # Compat-Shim → config.js
-│   │   └── normalization-rules.json  # Feuerwehr-Kürzel
-│   ├── errors/
-│   │   └── index.js           # Eigene Error-Klassen
-│   ├── events/
-│   │   └── eventBus.js        # Zentraler EventEmitter
-│   ├── middleware/
-│   │   ├── index.js           # Barrel-Export
-│   │   ├── apiKeyAuth.js      # Bearer-Token-Prüfung
-│   │   ├── corsMiddleware.js  # CORS
-│   │   ├── errorHandler.js    # Zentraler Fehlerhandler
-│   │   ├── notFoundHandler.js # 404
-│   │   ├── rateLimiter.js     # Rate-Limiting (global, announce, divera)
-│   │   ├── requestId.js       # UUID pro Request
-│   │   ├── requestLogger.js   # HTTP-Logging
-│   │   └── sanitize.js        # Eingabe-Sanitisierung
-│   ├── routes/
-│   │   ├── announce.js        # POST /announce, POST /fanfare
-│   │   ├── divera.js          # POST /divera
-│   │   ├── health.js          # GET /health
-│   │   ├── stats.js           # GET /stats, GET /stats/history
-│   │   └── voices.js          # GET /voices, POST /voice
-│   ├── services/
-│   │   ├── alarmService.js    # Orchestrierung: Normalize → Piper → FFmpeg
-│   │   ├── ffmpegService.js   # RTP-Streaming
-│   │   ├── historyService.js  # Alarmhistorie (in-memory)
-│   │   ├── normalizationService.js  # Feuerwehr-Kürzel-Engine
-│   │   ├── piperService.js    # TTS-Synthese
-│   │   ├── queueService.js    # Priorisierte Warteschlange
-│   │   └── websocketService.js  # Live-Dashboard WebSocket
-│   └── utils/
-│       ├── logger.js          # Winston-Logger
-│       ├── normalize.js       # Normalisierungs-Hilfsfunktionen
-│       ├── sanitize.js        # Text-Sanitisierung
-│       └── sleep.js           # Promise-basiertes Sleep
-├── public/
-│   └── index.html             # Live-Dashboard
-├── voices/                    # Piper Voice-Modelle (*.onnx)
-├── gong/                      # Gong/Fanfare-Dateien (*.wav)
-├── logs/                      # Log-Dateien (wird automatisch angelegt)
-├── tmp/                       # Temporäre WAV-Dateien (wird automatisch angelegt)
-├── .env.example               # Konfigurationsvorlage
-├── .gitignore
-├── package.json
-└── README.md
 ```
 
 ---
