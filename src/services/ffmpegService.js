@@ -54,30 +54,53 @@ async function runFfmpeg(args) {
  * @returns {Promise<void>}
  */
 async function mergeWavFiles(inputPaths, outputPath) {
+  if (!Array.isArray(inputPaths) || inputPaths.length === 0) {
+    throw new Error('Keine WAV-Dateien zum Zusammenführen');
+  }
+
+  const { sampleRate, channels } = config.rtp;
+
   if (inputPaths.length === 1) {
-    // Einzelne Datei – einfach kopieren
-    const data = await fs.readFile(inputPaths[0]);
-    await fs.writeFile(outputPath, data);
+    await runFfmpeg([
+      '-y',
+      '-i', inputPaths[0],
+      '-ar', String(sampleRate),
+      '-ac', String(channels),
+      '-c:a', 'pcm_s16le',
+      outputPath,
+    ]);
     return;
   }
 
-  // Concat-Liste als temporäre Datei
-  const listPath = makeTempPath('.txt');
-  const listContent = inputPaths.map(p => `file '${p}'`).join('\n');
-  await fs.writeFile(listPath, listContent, 'utf8');
+  const args = ['-y'];
 
-  try {
-    await runFfmpeg([
-      '-y',
-      '-f', 'concat',
-      '-safe', '0',
-      '-i', listPath,
-      '-c', 'copy',
-      outputPath,
-    ]);
-  } finally {
-    await removeTempFile(listPath);
+  for (const inputPath of inputPaths) {
+    args.push('-i', inputPath);
   }
+
+  const filterInputs = inputPaths
+    .map((_, index) =>
+      `[${index}:a]aresample=${sampleRate},aformat=sample_fmts=s16:channel_layouts=mono[a${index}]`
+    )
+    .join(';');
+
+  const concatInputs = inputPaths
+    .map((_, index) => `[a${index}]`)
+    .join('');
+
+  const filterGraph =
+    `${filterInputs};${concatInputs}concat=n=${inputPaths.length}:v=0:a=1[aout]`;
+
+  args.push(
+    '-filter_complex', filterGraph,
+    '-map', '[aout]',
+    '-c:a', 'pcm_s16le',
+    '-ar', String(sampleRate),
+    '-ac', String(channels),
+    outputPath,
+  );
+
+  await runFfmpeg(args);
 }
 
 /**
