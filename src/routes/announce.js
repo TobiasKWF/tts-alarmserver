@@ -3,22 +3,18 @@
 /**
  * @file routes/announce.js
  * @description POST /announce – Manuelle TTS-Alarmierung.
- *
- * Nimmt einen Text entgegen, enqueued ihn mit optionaler Priorität
- * und antwortet sofort mit HTTP 202 (Accepted).
- * Die eigentliche Verarbeitung erfolgt asynchron über die Queue.
+ *              POST /announce/fanfare – Direktes Abspielen einer Audiodatei.
  */
 
 const { Router } = require('express');
 const { body, validationResult } = require('express-validator');
 const { v4: uuidv4 } = require('uuid');
 
-const logger = require('../utils/logger').child({ service: 'AnnounceRoute' });
-const { QueueService } = require('../services/queueService');
-const { AlarmService } = require('../services/alarmService');
-const eventBus = require('../events/eventBus');
+const logger       = require('../utils/logger').child({ service: 'AnnounceRoute' });
+const queueService = require('../services/queueService');
+const eventBus     = require('../events/eventBus');
 const { ValidationError, QueueFullError } = require('../errors');
-const config = require('../config');
+const config       = require('../config');
 
 const router = Router();
 
@@ -40,7 +36,7 @@ const announceValidation = [
   body('voice')
     .optional()
     .isString().withMessage('voice muss ein String sein')
-    .isLength({ max: 200 }).withMessage('voice darf maximal 200 Zeichen lang sein'),
+    .isLength({ max: 200 }),
 
   body('speed')
     .optional()
@@ -53,100 +49,66 @@ const announceValidation = [
   body('gong')
     .optional()
     .isString().withMessage('gong muss ein String sein')
-    .isLength({ max: 200 }).withMessage('gong darf maximal 200 Zeichen lang sein'),
+    .isLength({ max: 200 }),
 
-  body('rtpHost')
-    .optional()
-    .isString().withMessage('rtpHost muss ein String sein'),
-
-  body('rtpPort')
-    .optional()
-    .isInt({ min: 1, max: 65535 }).withMessage('rtpPort muss zwischen 1 und 65535 liegen'),
+  body('rtpHost').optional().isString(),
+  body('rtpPort').optional().isInt({ min: 1, max: 65535 }),
 ];
 
 // ---------------------------------------------------------------------------
 // POST /announce
 // ---------------------------------------------------------------------------
 
-/**
- * POST /announce
- * Enqueued eine neue TTS-Alarmierung.
- *
- * Body:
- *   text        {string}  – Pflicht. Zu sprechender Text.
- *   priority    {number}  – Optional. 1 (höchste) bis 10 (niedrigste). Default: 5
- *   voice       {string}  – Optional. Piper-Stimme (override).
- *   speed       {number}  – Optional. Sprechgeschwindigkeit 0.5–2.0.
- *   volume      {number}  – Optional. Lautstärke 0–100.
- *   gong        {string}  – Optional. Gong-Dateiname (aus gong/ Verzeichnis).
- *   rtpHost     {string}  – Optional. RTP-Zieladresse (override).
- *   rtpPort     {number}  – Optional. RTP-Zielport (override).
- *
- * Response 202:
- *   { ok: true, alarmId, position, message }
- *
- * Response 400:
- *   { error, code, message, details }
- *
- * Response 429:
- *   { error, code, message } – Queue voll
- */
 router.post('/', announceValidation, (req, res, next) => {
   try {
-    // Validierungsergebnis prüfen
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      const details = errors.array().reduce((acc, e) => {
-        acc[e.path] = e.msg;
-        return acc;
-      }, {});
+      const details = errors.array().reduce((acc, e) => { acc[e.path] = e.msg; return acc; }, {});
       throw new ValidationError('Ungültige Anfrageparameter', details);
     }
 
     const alarmId = uuidv4();
     const { text, priority, voice, speed, volume, gong, rtpHost, rtpPort } = req.body;
+    const prio = priority || config.queue.defaultPriority;
 
     const payload = {
       id: alarmId,
       requestId: req.requestId,
       text,
-      voice: voice || config.piper.defaultVoice,
-      speed: speed || config.piper.speed,
-      volume: volume !== undefined ? volume : config.piper.volume,
-      gong: gong || null,
+      voice:   voice   || config.piper.defaultVoice,
+      speed:   speed   || config.piper.speed,
+      volume:  volume  !== undefined ? volume : config.piper.volume,
+      gong:    gong    || null,
       rtpHost: rtpHost || config.rtp.host,
       rtpPort: rtpPort || config.rtp.port,
     };
 
-    // Event vor dem Einreihen emittieren
     eventBus.emit('alarm.received', {
       alarmId,
       requestId: req.requestId,
       text,
-      priority: priority || config.queue.defaultPriority,
+      priority: prio,
     });
 
-    const queueService = QueueService.getInstance();
-    const { id, position } = queueService.enqueue(payload, priority || config.queue.defaultPriority);
-
-    logger.info('Alarmierung angenommen', {
-      alarmId: id,
-      requestId: req.requestId,
-      position,
-      text: text.slice(0, 80),
+    queueService.enqueue(
+      () => Promise.resolve(payload),
+      { id: alarmId, priority: prio, source: 'announce', text }
+    ).then(() => {
+      const position = queueService.status().waiting + 1;
+      logger.info('Alarmierung angenommen', { alarmId, requestId: req.requestId, position, text: text.slice(0, 80) });
+      res.status(202).json({
+        ok: true,
+        alarmId,
+        position,
+        message: `Alarmierung in Queue eingereiht (Position ${position})`,
+      });
+    }).catch(err => {
+      if (err.statusCode === 429) return next(new QueueFullError(config.queue.maxSize));
+      next(err);
     });
 
-    res.status(202).json({
-      ok: true,
-      alarmId: id,
-      position,
-      message: `Alarmierung in Queue eingereiht (Position ${position})`,
-    });
   } catch (err) {
-    // QUEUE_FULL in QueueFullError umwandeln
-    if (err.code === 'QUEUE_FULL') {
-      return next(new QueueFullError(config.queue.maxSize));
-    }
+    if (err.code === 'QUEUE_FULL') return next(new QueueFullError(config.queue.maxSize));
     next(err);
   }
 });
@@ -155,27 +117,14 @@ router.post('/', announceValidation, (req, res, next) => {
 // POST /announce/fanfare
 // ---------------------------------------------------------------------------
 
-/**
- * POST /play-fanfare
- * Spielt eine Audiodatei (Fanfare/Gong) ohne TTS-Synthese direkt ab.
- *
- * Body:
- *   file        {string}  – Pflicht. Dateiname aus gong/ Verzeichnis.
- *   priority    {number}  – Optional. Queue-Priorität.
- *   rtpHost     {string}  – Optional. RTP-Override.
- *   rtpPort     {number}  – Optional. RTP-Override.
- */
 router.post('/fanfare', [
   body('file')
     .isString().withMessage('file muss ein String sein')
     .trim()
     .notEmpty().withMessage('file darf nicht leer sein')
-    .isLength({ max: 200 }).withMessage('file darf maximal 200 Zeichen lang sein'),
+    .isLength({ max: 200 }),
 
-  body('priority')
-    .optional()
-    .isInt({ min: 1, max: 10 }).withMessage('priority muss zwischen 1 und 10 liegen'),
-
+  body('priority').optional().isInt({ min: 1, max: 10 }),
   body('rtpHost').optional().isString(),
   body('rtpPort').optional().isInt({ min: 1, max: 65535 }),
 ], (req, res, next) => {
@@ -188,40 +137,46 @@ router.post('/fanfare', [
 
     const alarmId = uuidv4();
     const { file, priority, rtpHost, rtpPort } = req.body;
+    const prio = priority || config.queue.defaultPriority;
 
-    // Fanfare wird als leerer Text mit Gong verarbeitet
     const payload = {
       id: alarmId,
       requestId: req.requestId,
-      text: '',           // Kein TTS-Text
-      fanfareFile: file,  // Direkt als Audiodatei streamen
+      text: '',
+      fanfareFile: file,
       gong: file,
-      voice: config.piper.defaultVoice,
-      speed: config.piper.speed,
-      volume: config.piper.volume,
+      voice:   config.piper.defaultVoice,
+      speed:   config.piper.speed,
+      volume:  config.piper.volume,
       rtpHost: rtpHost || config.rtp.host,
       rtpPort: rtpPort || config.rtp.port,
-      fanfareOnly: true,  // Flag für AlarmService: kein Piper-Aufruf
+      fanfareOnly: true,
     };
 
     eventBus.emit('alarm.received', {
       alarmId,
       requestId: req.requestId,
       text: `[Fanfare: ${file}]`,
-      priority: priority || config.queue.defaultPriority,
+      priority: prio,
     });
 
-    const queueService = QueueService.getInstance();
-    const { id, position } = queueService.enqueue(payload, priority || config.queue.defaultPriority);
-
-    logger.info('Fanfare eingereiht', { alarmId: id, file, position });
-
-    res.status(202).json({
-      ok: true,
-      alarmId: id,
-      position,
-      message: `Fanfare in Queue eingereiht (Position ${position})`,
+    queueService.enqueue(
+      () => Promise.resolve(payload),
+      { id: alarmId, priority: prio, source: 'fanfare', text: `[Fanfare: ${file}]` }
+    ).then(() => {
+      const position = queueService.status().waiting + 1;
+      logger.info('Fanfare eingereiht', { alarmId, file, position });
+      res.status(202).json({
+        ok: true,
+        alarmId,
+        position,
+        message: `Fanfare in Queue eingereiht (Position ${position})`,
+      });
+    }).catch(err => {
+      if (err.statusCode === 429) return next(new QueueFullError(config.queue.maxSize));
+      next(err);
     });
+
   } catch (err) {
     if (err.code === 'QUEUE_FULL') return next(new QueueFullError(config.queue.maxSize));
     next(err);

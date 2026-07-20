@@ -9,8 +9,12 @@ const path           = require('path');
 const requestLogger  = require('./middleware/requestLogger');
 const errorHandler   = require('./middleware/errorHandler');
 const alarmRoutes    = require('./routes/alarm');
+const announceRoutes = require('./routes/announce');
 const statusRoutes   = require('./routes/status');
 const historyRoutes  = require('./routes/history');
+const statsRoutes    = require('./routes/stats');
+const healthRoutes   = require('./routes/health');
+const voicesRoutes   = require('./routes/voices');
 const diveraRoutes   = require('./routes/divera');
 const dashboardRoute = require('./routes/dashboard');
 const logger         = require('./logging/logger');
@@ -28,12 +32,16 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.use(requestLogger);
 
 // Routen
-app.use('/api/alarm',   alarmRoutes);
-app.use('/api/status',  statusRoutes);
-app.use('/api/history', historyRoutes);
-app.use('/api/divera',  diveraRoutes);
+app.use('/api/alarm',    alarmRoutes);
+app.use('/announce',     announceRoutes);
+app.use('/api/status',   statusRoutes);
+app.use('/api/history',  historyRoutes);
+app.use('/api/stats',    statsRoutes);
+app.use('/api/health',   healthRoutes);
+app.use('/api/voices',   voicesRoutes);
+app.use('/api/divera',   diveraRoutes);
 
-// Dashboard (v3.1) – strict: false im Router deckt /dashboard und /dashboard/ ab
+// Dashboard – strict: false im Router deckt /dashboard und /dashboard/ ab
 app.use('/dashboard', dashboardRoute);
 
 // 404
