@@ -2,16 +2,6 @@
 
 /**
  * Alarm-Service – Haupt-Orchestrierung.
- *
- * Ablauf:
- *   1. Rohen Alarmtext empfangen
- *   2. Alarmtext bereinigen (nur relevante Infos)
- *   3. Sprachoptimierung (Codes, Abkuerzungen, Zahlen)
- *   4. TTS: Text → WAV-Dateien
- *   5. Streaming: WAV → RTP
- *   6. Temporaere Dateien aufraeumen
- *   7. Alarmierung protokollieren
- *   8. DashboardState aktualisieren (v3.1)
  */
 
 const { buildSpeechText }    = require('../tts/alarmCleaner');
@@ -20,15 +10,16 @@ const { textToWavFiles }     = require('./piperService');
 const { processToRtp }       = require('./ffmpegService');
 const { streamRtp }          = require('../streaming/rtpStreamer');
 const { removeTempFiles }    = require('../utils/tempFiles');
+const { ensureTmpDir }       = require('../utils/tempFiles');
 const { logAlarm }           = require('../logging/alarmLog');
 const historyService         = require('./historyService');
 const dashboardState         = require('./dashboardState').getInstance();
 const logger                 = require('../logging/logger');
 
 /**
- * Verarbeitet eine eingehende Alarm-Anfrage vollstaendig.
+ * Verarbeitet eine eingehende Alarm-Anfrage vollständig.
  * @param {string} rawText    - Roher Alarmtext aus der HTTP-Anfrage
- * @param {string} requestId  - Eindeutige ID fuer Logging
+ * @param {string} requestId  - Eindeutige ID für Logging
  * @returns {Promise<{ cleanText: string, spokenText: string }>}
  */
 async function processAlarm(rawText, requestId) {
@@ -36,6 +27,9 @@ async function processAlarm(rawText, requestId) {
   const tempFiles = [];
   let cleanText  = '';
   let spokenText = '';
+
+  // Sicherstellen dass TMP-Verzeichnis existiert (unabhängig vom aufrufenden Route)
+  await ensureTmpDir();
 
   try {
     // 1+2. Bereinigen und aufbauen
@@ -53,13 +47,13 @@ async function processAlarm(rawText, requestId) {
     const wavFiles = await textToWavFiles(spokenText);
     tempFiles.push(...wavFiles);
 
-    // 5a. WAV → RTP-Datei zusammenfuehren + kodieren
+    // 5a. WAV → RTP-Datei zusammenführen + kodieren
     const rtpFile = await processToRtp(wavFiles);
     tempFiles.push(rtpFile);
 
-    // Dashboard: Durchsage als aktiv markieren (Dauer wird geschaetzt mit 100ms/Wort)
-    const wordCount    = spokenText.split(/\s+/).length;
-    const estimatedMs  = Math.max(2000, wordCount * 400);
+    // Dashboard: Durchsage als aktiv markieren
+    const wordCount   = spokenText.split(/\s+/).length;
+    const estimatedMs = Math.max(2000, wordCount * 400);
     dashboardState.setCurrentSpeech({
       text:       spokenText,
       alarmId:    requestId,
@@ -74,10 +68,9 @@ async function processAlarm(rawText, requestId) {
     // 6. Protokollieren
     const endTime = Date.now();
     logAlarm({ requestId, startTime, endTime, cleanText, spokenText, success: true });
-    const historyEntry = { requestId, startTime, endTime, cleanText, spokenText, success: true };
-    historyService.add(historyEntry);
+    historyService.add({ requestId, startTime, endTime, cleanText, spokenText, success: true });
 
-    // Dashboard: Durchsage abgeschlossen, Historie aktualisieren
+    // Dashboard: Durchsage abgeschlossen
     dashboardState.clearCurrentSpeech();
     dashboardState.addToHistory({
       alarmId:    requestId,
@@ -94,7 +87,6 @@ async function processAlarm(rawText, requestId) {
     logAlarm({ requestId, startTime, endTime, cleanText, spokenText, success: false, error: err.message });
     historyService.add({ requestId, startTime, endTime, cleanText, spokenText, success: false, error: err.message });
 
-    // Dashboard: Fehler und Durchsage beenden
     dashboardState.clearCurrentSpeech();
     dashboardState.addToHistory({
       alarmId:    requestId,
@@ -107,7 +99,6 @@ async function processAlarm(rawText, requestId) {
     throw err;
 
   } finally {
-    // Immer: Temp-Dateien aufraeumen
     await removeTempFiles(tempFiles);
   }
 }
