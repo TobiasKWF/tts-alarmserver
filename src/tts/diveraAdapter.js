@@ -20,7 +20,7 @@
  */
 
 const { buildSpeechText } = require('./alarmCleaner');
-const { enhance } = require('./speechEnhancer');
+const { enhanceSpeech } = require('./speechEnhancer');
 const logger = require('../utils/logger').child({ service: 'DiveraAdapter' });
 
 /**
@@ -56,7 +56,7 @@ function adaptDiveraPayload(payload) {
 
   // Bereinigung + Sprachoptimierung
   const cleanText  = buildSpeechText(rawText);
-  const spokenText = enhance(cleanText);
+  const spokenText = enhanceSpeech(cleanText);
 
   logger.debug('DiveraAdapter Ergebnis', { cleanText, spokenText });
 
