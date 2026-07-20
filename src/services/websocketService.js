@@ -3,42 +3,18 @@
 /**
  * @file services/websocketService.js
  * @description WebSocket-Service für das Live-Dashboard.
- *
- * Bindet sich an den HTTP-Server und leitet alle relevanten EventBus-Events
- * als JSON-Nachrichten an verbundene Dashboard-Clients weiter.
- * Sendet außerdem einen initialen State-Snapshot beim Connect und
- * alle 10 Sekunden ein server.stats-Update.
- *
- * Protokoll (Client empfängt):
- *   { type: 'snapshot',    server, queue, alarm, history }
- *   { type: 'server.stats', server, queue, alarm }
- *   { type: 'alarm.received',  alarmId, text, priority, position, queueSize }
- *   { type: 'alarm.started',   alarmId, text, voice, priority }
- *   { type: 'alarm.finished',  alarmId, durationMs, status }
- *   { type: 'alarm.failed',    alarmId, error, code }
- *   { type: 'tts.started',     alarmId, voice, textLength }
- *   { type: 'tts.finished',    alarmId, voice, outputFile, sizeBytes, durationMs }
- *   { type: 'tts.error',       alarmId, voice, error }
- *   { type: 'stream.started',  alarmId, rtpUrl }
- *   { type: 'stream.finished', alarmId, rtpUrl, durationMs }
- *   { type: 'stream.error',    alarmId, rtpUrl, error }
- *   { type: 'queue.changed',   size, items, paused? }
- *   { type: 'queue.empty' }
  */
 
 const { WebSocketServer } = require('ws');
-const config    = require('../config');
-const logger    = require('../utils/logger').child({ service: 'WebSocketService' });
-const eventBus  = require('../events/eventBus');
+const config         = require('../config');
+const logger         = require('../utils/logger').child({ service: 'WebSocketService' });
+const eventBus       = require('../events/eventBus');
+const queueService   = require('./queueService');
+const historyService = require('./historyService');
 
 /** @type {WebSocketServer|null} */
 let wss = null;
 
-/**
- * Events die an Dashboard-Clients weitergeleitet werden.
- * Muss mit dem Protokoll oben synchron gehalten werden.
- * @type {string[]}
- */
 const BROADCAST_EVENTS = [
   'alarm.received',
   'alarm.started',
@@ -57,29 +33,22 @@ const BROADCAST_EVENTS = [
   'server.stopping',
 ];
 
-/**
- * Initialisiert den WebSocket-Server und bindet ihn an den HTTP-Server.
- * @param {import('http').Server} httpServer
- */
 function initWebSocket(httpServer) {
   wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
   logger.info('WebSocket-Server initialisiert', { path: '/ws' });
 
-  // Alle konfigurierten Events auf den EventBus hören und als Broadcast senden
   BROADCAST_EVENTS.forEach((eventName) => {
     eventBus.on(eventName, (data) => {
       _broadcast({ type: eventName, ...data });
     });
   });
 
-  // Regelmäßiges server.stats-Update (alle 10s)
   const statsInterval = setInterval(() => {
     if (!wss || wss.clients.size === 0) return;
     _broadcast(_buildStatsPayload());
   }, 10_000);
 
-  // Ping-Pong Keepalive
   const pingInterval = setInterval(() => {
     if (!wss) return;
     wss.clients.forEach((client) => {
@@ -122,7 +91,6 @@ function initWebSocket(httpServer) {
       });
     });
 
-    // Initialen Snapshot senden
     _sendSnapshot(ws);
   });
 
@@ -141,19 +109,12 @@ function initWebSocket(httpServer) {
 // Private
 // ---------------------------------------------------------------------------
 
-/**
- * Baut das server.stats Payload auf.
- * @returns {object}
- */
 function _buildStatsPayload() {
-  const { QueueService } = require('./queueService');
-  const { AlarmService } = require('./alarmService');
-  const { getConnectedClients } = module.exports;
-
-  const mem = process.memoryUsage();
+  const mem         = process.memoryUsage();
+  const queueStatus = queueService.status();
 
   return {
-    type:  'server.stats',
+    type: 'server.stats',
     server: {
       version:     process.env.npm_package_version || '1.0.0',
       uptime:      Math.floor(process.uptime()),
@@ -166,8 +127,11 @@ function _buildStatsPayload() {
         rssMB:       Math.round(mem.rss       / 1_048_576),
       },
     },
-    queue:  QueueService.getInstance().getStats(),
-    alarm:  AlarmService.getInstance().getStats(),
+    queue: {
+      running:  queueStatus.running,
+      waiting:  queueStatus.waiting,
+      maxSize:  queueStatus.maxSize,
+    },
     rtp: {
       host: config.rtp.host,
       port: config.rtp.port,
@@ -178,21 +142,15 @@ function _buildStatsPayload() {
   };
 }
 
-/**
- * Sendet einen initialen Snapshot (type='snapshot') an einen neu verbundenen Client.
- * @param {import('ws').WebSocket} ws
- */
 function _sendSnapshot(ws) {
   try {
-    const { AlarmService } = require('./alarmService');
     const stats   = _buildStatsPayload();
-    const history = AlarmService.getInstance().getHistory(50);
+    const history = historyService.getLast(50);
 
     _sendToClient(ws, {
       type:    'snapshot',
       server:  stats.server,
       queue:   stats.queue,
-      alarm:   stats.alarm,
       rtp:     stats.rtp,
       websocket: stats.websocket,
       history,
@@ -202,10 +160,6 @@ function _sendSnapshot(ws) {
   }
 }
 
-/**
- * Sendet eine Nachricht an alle verbundenen Dashboard-Clients.
- * @param {object} data
- */
 function _broadcast(data) {
   if (!wss || wss.clients.size === 0) return;
   const payload = JSON.stringify(data);
@@ -216,21 +170,11 @@ function _broadcast(data) {
   });
 }
 
-/**
- * Sendet eine Nachricht an einen einzelnen Client (JSON serialisiert).
- * @param {import('ws').WebSocket} ws
- * @param {object} data
- */
 function _sendToClient(ws, data) {
   if (ws.readyState !== ws.OPEN) return;
   _sendRaw(ws, JSON.stringify(data));
 }
 
-/**
- * Sendet rohen String an einen WebSocket-Client – fängt Fehler ab.
- * @param {import('ws').WebSocket} ws
- * @param {string} payload
- */
 function _sendRaw(ws, payload) {
   try {
     ws.send(payload);
@@ -239,11 +183,6 @@ function _sendRaw(ws, payload) {
   }
 }
 
-/**
- * Formatiert Sekunden als menschenlesbare Uptime.
- * @param {number} seconds
- * @returns {string}
- */
 function _formatUptime(seconds) {
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
@@ -254,10 +193,6 @@ function _formatUptime(seconds) {
   return `${m}m ${s}s`;
 }
 
-/**
- * Gibt die aktuelle Anzahl verbundener Clients zurück.
- * @returns {number}
- */
 function getConnectedClients() {
   return wss ? wss.clients.size : 0;
 }
