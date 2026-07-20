@@ -2,9 +2,6 @@
 
 /**
  * Mapping: Feuerwehr-Alarmstufen → ausgeschriebene deutsche Bezeichnung.
- *
- * Wird in normalizationService.js und speechEnhancer.js verwendet.
- * Neue Einträge hier ergänzen – kein Code-Änderung nötig.
  */
 
 const ALARM_MAPPING = {
@@ -56,25 +53,35 @@ const ALARM_MAPPING = {
   'UW':   'Unwetterlage',
 };
 
-/**
- * Gibt die ausgeschriebene Bezeichnung für ein Alarmstichwort zurück.
- * @param {string} code - z.B. 'B2'
- * @returns {string|null}
- */
 function getAlarmLabel(code) {
   return ALARM_MAPPING[code.toUpperCase()] || null;
 }
 
 /**
- * Ersetzt alle bekannten Alarmstichwörter am Anfang einer Zeile.
+ * Ersetzt alle bekannten Alarmstichwörter im Text.
+ * Unterstützt sowohl kompakte ('B2') als auch getrennte ('B 2') Schreibweise.
  * @param {string} text
  * @returns {string}
  */
 function replaceAlarmCodes(text) {
-  // Nur am Wortanfang ersetzen, damit z.B. "B2-Lage" korrekt behandelt wird
-  return text.replace(/\b([A-Z]+\d*)\b/g, (match) => {
+  // Schritt 1: 'B 2' -> 'B2' normalisieren (Buchstaben direkt gefolgt von Leerzeichen+Zahl)
+  // Nur am Wortanfang (nach Zeilenstart, Satzzeichen oder Leerzeichen)
+  let result = text.replace(
+    /(^|[\s.,;!?])([A-Z]+)\s+(\d+)(?=[\s.,;!?]|$)/g,
+    (match, pre, letters, digits) => {
+      const compact = letters + digits;
+      // Nur normalisieren wenn der kompakte Code im Mapping existiert
+      if (ALARM_MAPPING[compact]) return pre + compact;
+      return match;
+    }
+  );
+
+  // Schritt 2: kompakte Codes ersetzen
+  result = result.replace(/\b([A-Z]+\d+|[A-Z]{2,})\b/g, (match) => {
     return ALARM_MAPPING[match] || match;
   });
+
+  return result;
 }
 
 module.exports = { ALARM_MAPPING, getAlarmLabel, replaceAlarmCodes };
