@@ -9,47 +9,23 @@ const { Router } = require('express');
 const { body, validationResult } = require('express-validator');
 const { v4: uuidv4 } = require('uuid');
 
-const logger = require('../utils/logger').child({ service: 'DiveraRoute' });
-const queueService = require('../services/queueService');
-const eventBus = require('../events/eventBus');
+const logger            = require('../utils/logger').child({ service: 'DiveraRoute' });
+const queueService      = require('../services/queueService');
+const { processAlarm }  = require('../services/alarmService');
+const eventBus          = require('../events/eventBus');
 const { ValidationError, QueueFullError } = require('../errors');
-const config = require('../config');
+const config            = require('../config');
 const { adaptDiveraPayload } = require('../tts/diveraAdapter');
 
 const router = Router();
 
-// ---------------------------------------------------------------------------
-// Divera Webhook-Validierung
-// ---------------------------------------------------------------------------
-
 const diveraValidation = [
-  body('title')
-    .optional()
-    .isString().withMessage('title muss ein String sein')
-    .isLength({ max: 500 }),
-
-  body('text')
-    .optional()
-    .isString().withMessage('text muss ein String sein')
-    .isLength({ max: 2000 }),
-
-  body('address')
-    .optional()
-    .isString().withMessage('address muss ein String sein')
-    .isLength({ max: 500 }),
-
-  body('priority')
-    .optional()
-    .isInt({ min: 1, max: 10 }).withMessage('priority muss zwischen 1 und 10 liegen'),
-
-  body('ucr_self_status_id')
-    .optional()
-    .isInt(),
+  body('title').optional().isString().isLength({ max: 500 }),
+  body('text').optional().isString().isLength({ max: 2000 }),
+  body('address').optional().isString().isLength({ max: 500 }),
+  body('priority').optional().isInt({ min: 1, max: 10 }),
+  body('ucr_self_status_id').optional().isInt(),
 ];
-
-// ---------------------------------------------------------------------------
-// POST /api/divera
-// ---------------------------------------------------------------------------
 
 router.post('/', diveraValidation, (req, res, next) => {
   try {
@@ -69,69 +45,39 @@ router.post('/', diveraValidation, (req, res, next) => {
     }
 
     const spokenText = adaptDiveraPayload({ title, text, address });
-    const alarmId = uuidv4();
-
-    const gong = (config.divera && config.divera.gong)
-      ? config.divera.gong
-      : (config.audio && config.audio.defaultGong)
-        ? config.audio.defaultGong
-        : null;
+    const alarmId    = uuidv4();
+    const prio       = priority || config.queue.defaultPriority;
 
     logger.info('Divera-Webhook empfangen', {
       alarmId,
       requestId: req.requestId,
       title,
       address,
-      gong: gong || '(kein Gong)',
       spokenText: spokenText.slice(0, 120),
     });
-
-    const payload = {
-      id: alarmId,
-      requestId: req.requestId,
-      text: spokenText,
-      voice: config.piper.defaultVoice,
-      speed: config.piper.speed,
-      volume: config.piper.volume,
-      gong,
-      rtpHost: config.rtp.host,
-      rtpPort: config.rtp.port,
-      source: 'divera',
-      diveraData: { title, text, address },
-    };
 
     eventBus.emit('alarm.received', {
       alarmId,
       requestId: req.requestId,
       text: spokenText,
       source: 'divera',
-      priority: priority || config.queue.defaultPriority,
+      priority: prio,
     });
 
-    const prio = priority || config.queue.defaultPriority;
-
+    // Alarm asynchron über Queue verarbeiten (TTS + RTP + DashboardState)
     queueService.enqueue(
-      () => Promise.resolve(payload),
+      () => processAlarm(spokenText, alarmId),
       { id: alarmId, priority: prio, source: 'divera', text: spokenText }
-    ).then(({ }) => {
-      // position not available from AlarmQueue – use queue status
-      const position = queueService.status().waiting + 1;
+    ).catch(err => {
+      logger.error('Divera Queue-Fehler', { alarmId, error: err.message });
+    });
 
-      logger.info('Divera-Alarm eingereiht', {
-        alarmId,
-        spokenText: spokenText.slice(0, 100),
-      });
-
-      res.status(202).json({
-        ok: true,
-        alarmId,
-        position,
-        spokenText,
-        message: `Divera-Alarm in Queue eingereiht (Position ${position})`,
-      });
-    }).catch(err => {
-      if (err.statusCode === 429) return next(new QueueFullError(config.queue.maxSize));
-      next(err);
+    res.status(202).json({
+      ok: true,
+      alarmId,
+      position: queueService.status().waiting,
+      spokenText,
+      message: 'Divera-Alarm in Queue eingereiht',
     });
 
   } catch (err) {
