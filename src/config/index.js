@@ -13,13 +13,13 @@ const config = {
     host: process.env.HOST || '0.0.0.0',
   },
 
-  piper: {
-    binary:         process.env.PIPER_BINARY       || '/usr/local/bin/piper',
-    model:          process.env.PIPER_MODEL        || '/opt/piper/models/de_DE-thorsten-low.onnx',
-    maxChunkLength: parseInt(process.env.PIPER_MAX_CHUNK      || '500',   10),
-    timeoutMs:      parseInt(process.env.PIPER_TIMEOUT_MS     || '30000', 10),
-    lengthScale:    parseFloat(process.env.PIPER_LENGTH_SCALE  || '1.0'),
-    noiseScaleW:    parseFloat(process.env.PIPER_NOISE_SCALE_W || '0.8'),
+ piper: {
+   binary:         process.env.PIPER_BINARY       || '/usr/local/bin/piper',
+   model:          process.env.PIPER_MODEL        || '/opt/piper/models/de_DE-thorsten-low.onnx',
+   maxChunkLength: parseInt(process.env.PIPER_MAX_CHUNK || '500', 10),
+   timeoutMs:      parseInt(process.env.PIPER_TIMEOUT_MS || '30000', 10),
+   lengthScale:    parseFloat(process.env.PIPER_LENGTH_SCALE || '1.0'),
+   noiseScaleW:    parseFloat(process.env.PIPER_NOISE_SCALE_W || '0.8'),
   },
 
   ffmpeg: {
