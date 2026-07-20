@@ -2,75 +2,66 @@
 
 /**
  * @file routes/voices.js
- * @description GET /voices, POST /voice – Stimmen-Verwaltung.
- *
- * Listet verfügbare Piper-Stimmen auf und erlaubt das
- * Umschalten der Standard-Stimme zur Laufzeit.
+ * @description GET /api/voices, POST /api/voices – Stimmen-Verwaltung.
  */
 
 const { Router } = require('express');
 const { body, validationResult } = require('express-validator');
+const fs   = require('fs');
+const path = require('path');
 
 const logger = require('../utils/logger').child({ service: 'VoicesRoute' });
-const { PiperService } = require('../services/piperService');
 const { apiKeyAuth } = require('../middleware/apiKeyAuth');
 const { ValidationError, NotFoundError } = require('../errors');
 const config = require('../config');
 
 const router = Router();
 
+/**
+ * Liest alle verfügbaren Piper-Stimmen aus dem voicesDir.
+ * Eine Stimme = eine .onnx-Datei (ohne Endung).
+ * @returns {string[]}
+ */
+function listVoices() {
+  try {
+    const dir = config.piper.voicesDir;
+    if (!dir || !fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir)
+      .filter(f => f.endsWith('.onnx'))
+      .map(f => path.basename(f, '.onnx'))
+      .sort();
+  } catch (_) {
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
-// GET /voices
+// GET /api/voices
 // ---------------------------------------------------------------------------
 
-/**
- * GET /voices
- * Listet alle verfügbaren Piper-Stimmen auf.
- *
- * Response:
- *   { ok: true, defaultVoice, voices: ["de_DE-thorsten-high", ...] }
- */
 router.get('/', (req, res) => {
-  const piperService = PiperService.getInstance();
-  const voices = piperService.listVoices();
+  const voices = listVoices();
 
   logger.debug('Stimmen abgerufen', { count: voices.length, requestId: req.requestId });
 
   res.json({
-    ok: true,
+    ok:           true,
     defaultVoice: config.piper.defaultVoice,
-    voicesDir: config.piper.voicesDir,
+    voicesDir:    config.piper.voicesDir,
     voices,
   });
 });
 
 // ---------------------------------------------------------------------------
-// POST /voice
+// POST /api/voices  – Standard-Stimme ändern (API-Key erforderlich)
 // ---------------------------------------------------------------------------
 
-/**
- * POST /voice
- * Ändert die Standard-Stimme zur Laufzeit.
- * Erfordert API-Key-Authentifizierung.
- *
- * Body:
- *   voice {string} – Pflicht. Name der gewünschten Stimme.
- *
- * Response 200:
- *   { ok: true, voice, message }
- *
- * Response 400:
- *   Ungültige Parameter
- *
- * Response 404:
- *   Stimme nicht gefunden
- */
 router.post('/', apiKeyAuth, [
   body('voice')
     .isString().withMessage('voice muss ein String sein')
     .trim()
     .notEmpty().withMessage('voice darf nicht leer sein')
-    .isLength({ max: 200 }).withMessage('voice darf maximal 200 Zeichen lang sein'),
+    .isLength({ max: 200 }),
 ], (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -80,10 +71,8 @@ router.post('/', apiKeyAuth, [
     }
 
     const { voice } = req.body;
-    const piperService = PiperService.getInstance();
-    const available = piperService.listVoices();
+    const available = listVoices();
 
-    // Prüfen ob die Stimme existiert
     if (available.length > 0 && !available.includes(voice)) {
       throw new NotFoundError(
         `Stimme nicht gefunden: ${voice}`,
@@ -91,16 +80,12 @@ router.post('/', apiKeyAuth, [
       );
     }
 
-    // Laufzeit-Override der Standard-Stimme
     config.piper.defaultVoice = voice;
 
-    logger.info('Standard-Stimme geändert', {
-      voice,
-      requestId: req.requestId,
-    });
+    logger.info('Standard-Stimme geändert', { voice, requestId: req.requestId });
 
     res.json({
-      ok: true,
+      ok:      true,
       voice,
       message: `Standard-Stimme auf "${voice}" gesetzt`,
     });
