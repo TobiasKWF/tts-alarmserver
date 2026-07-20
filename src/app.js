@@ -33,7 +33,7 @@ app.use('/api/status',  statusRoutes);
 app.use('/api/history', historyRoutes);
 app.use('/api/divera',  diveraRoutes);
 
-// Dashboard (v3.1)
+// Dashboard (v3.1) – strict: false im Router deckt /dashboard und /dashboard/ ab
 app.use('/dashboard', dashboardRoute);
 
 // 404
