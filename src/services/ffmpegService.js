@@ -123,9 +123,6 @@ async function wavToRtp(inputPath, outputPath) {
   ]);
 }
 
-  await runFfmpeg(ffmpegArgs);
-}
-
 /**
  * Kompletter Pipeline-Schritt: WAV-Liste → einzelne RTP-Datei.
  * @param {string[]} wavPaths   - Input-WAV-Dateien
