@@ -6,6 +6,7 @@
  * Aufgaben:
  *   1. WAV-Dateien zusammenführen (concat)
  *   2. WAV → RTP-kompatibles Format konvertieren (PCM µ-law / G.711)
+ *      Optional: Pitch-Shift via asetrate-Trick (keine zusätzliche Library nötig)
  */
 
 const { spawn } = require('child_process');
@@ -81,23 +82,58 @@ async function mergeWavFiles(inputPaths, outputPath) {
 }
 
 /**
+ * Berechnet den asetrate-Faktor für einen Pitch-Shift in Halbtonschritten.
+ * Formel: factor = 2^(semitones/12)
+ * Beispiel: -2 Halbtöne → factor ≈ 0.8909 → 22050 * 0.8909 ≈ 19643 Hz
+ *
+ * Trick: asetrate ändert die interpretierte Samplerate (Pitchänderung ohne Tempoänderung
+ * wird durch nachfolgendes aresample wieder auf Originalrate gebracht).
+ *
+ * @param {number} semitones  - Halbtonschritte (negativ = tiefer)
+ * @param {number} sampleRate - Original-Samplerate des Inputs
+ * @returns {string} ffmpeg-af-Filterstring oder leerer String wenn semitones === 0
+ */
+function buildPitchFilter(semitones, sampleRate) {
+  if (semitones === 0) return '';
+  const factor      = Math.pow(2, semitones / 12);
+  const newRate     = Math.round(sampleRate * factor);
+  // asetrate: Pitch runter/hoch ohne Tempoänderung (kombiniert mit aresample)
+  return `asetrate=${newRate},aresample=${sampleRate}`;
+}
+
+/**
  * Konvertiert eine WAV-Datei in das RTP-Streamformat.
  * Standard: PCM µ-law (G.711), 8 kHz, mono.
+ * Wenn FFMPEG_PITCH_SEMITONES != 0 wird zusätzlich Pitch-Shift angewendet.
  * @param {string} inputPath
  * @param {string} outputPath
  * @returns {Promise<void>}
  */
 async function wavToRtp(inputPath, outputPath) {
   const { codec, sampleRate, channels } = config.rtp;
-  await runFfmpeg([
-    '-y',
-    '-i', inputPath,
-    '-ar', String(sampleRate),
-    '-ac', String(channels),
+  const pitchSemitones = config.ffmpeg.pitchSemitones;
+
+  // Pitch-Filter nur wenn konfiguriert (spart CPU bei pitchSemitones=0)
+  // Input-Samplerate von Piper ist 22050 Hz
+  const PIPER_SAMPLE_RATE = 22050;
+  const pitchFilter = buildPitchFilter(pitchSemitones, PIPER_SAMPLE_RATE);
+
+  const ffmpegArgs = ['-y', '-i', inputPath];
+
+  if (pitchFilter) {
+    ffmpegArgs.push('-af', pitchFilter);
+    logger.debug(`ffmpegService: Pitch-Shift ${pitchSemitones > 0 ? '+' : ''}${pitchSemitones} Halbтöne aktiv (Filter: ${pitchFilter})`);
+  }
+
+  ffmpegArgs.push(
+    '-ar',     String(sampleRate),
+    '-ac',     String(channels),
     '-acodec', codec,
-    '-f', 'rtp',
+    '-f',      'rtp',
     outputPath,
-  ]);
+  );
+
+  await runFfmpeg(ffmpegArgs);
 }
 
 /**

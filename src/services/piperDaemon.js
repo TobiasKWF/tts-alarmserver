@@ -78,8 +78,9 @@ class PiperDaemon {
     this._starting = true;
 
     const args = [
-      '--model',        config.piper.model,
-      '--length-scale', String(config.piper.lengthScale),
+      '--model',         config.piper.model,
+      '--length-scale',  String(config.piper.lengthScale),
+      '--noise-scale-w', String(config.piper.noiseScaleW),
       '--json-input',
       '--output-raw',
     ];
