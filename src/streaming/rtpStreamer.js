@@ -5,11 +5,19 @@
  *
  * Streamt eine fertige Audio-Datei per ffmpeg als RTP-Multicast-Stream.
  * Unterstützt Unicast und Multicast.
+ *
+ * Wichtig: -ar 16000 als Input-Hint damit -re den richtigen Takt
+ * (16 kHz) verwendet. Piper thorsten-low gibt 16 kHz PCM aus.
+ * Ohne diesen Hint würde ffmpeg -re mit 22050 Hz takten →
+ * Stream zu langsam + Stimme zu tief.
  */
 
 const { spawn } = require('child_process');
 const config = require('../config');
 const logger = require('../logging/logger');
+
+// Piper thorsten-low gibt 16 kHz PCM aus – muss als Input-Hint gesetzt werden
+const PIPER_OUTPUT_SAMPLE_RATE = 16000;
 
 /**
  * Streamt eine WAV-Datei als RTP.
@@ -22,8 +30,9 @@ async function streamRtp(audioFile) {
   return new Promise((resolve, reject) => {
     const args = [
       '-re',
+      '-ar', String(PIPER_OUTPUT_SAMPLE_RATE),  // Input-Takt: 16 kHz (Piper thorsten-low)
       '-i', audioFile,
-      '-ar', String(config.rtp.sampleRate),
+      '-ar', String(config.rtp.sampleRate),      // Output: 8 kHz G.711
       '-ac', String(config.rtp.channels),
       '-acodec', config.rtp.codec,
       '-f', 'rtp',
