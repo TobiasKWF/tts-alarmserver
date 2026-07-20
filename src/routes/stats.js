@@ -2,73 +2,57 @@
 
 /**
  * @file routes/stats.js
- * @description GET /stats, GET /history – Statistik- und Historien-Endpunkte.
- *
- * Öffentlich zugänglich (kein API-Key erforderlich),
- * da sie nur Lese-Informationen liefern.
+ * @description GET /api/stats, GET /api/stats/history
  */
 
 const { Router } = require('express');
 const { query, validationResult } = require('express-validator');
 
-const logger = require('../utils/logger').child({ service: 'StatsRoute' });
-const { QueueService } = require('../services/queueService');
-const { AlarmService } = require('../services/alarmService');
+const logger         = require('../utils/logger').child({ service: 'StatsRoute' });
+const queueService   = require('../services/queueService');
+const historyService = require('../services/historyService');
 const { getConnectedClients } = require('../services/websocketService');
 const config = require('../config');
 
 const router = Router();
 
 // ---------------------------------------------------------------------------
-// GET /stats
+// GET /api/stats
 // ---------------------------------------------------------------------------
 
-/**
- * GET /stats
- * Liefert kombinierte Statistiken über Server, Queue und Alarmverarbeitung.
- *
- * Response:
- *   {
- *     ok: true,
- *     server: { uptime, uptimeHuman, version, nodeEnv, pid, memory },
- *     queue:  { size, processedTotal, failedTotal, running, paused },
- *     alarm:  { totalAlarms, failedAlarms, current },
- *     websocket: { connectedClients },
- *     rtp: { host, port, codec, bitrate },
- *     timestamp: ISO-String
- *   }
- */
 router.get('/', (req, res) => {
   const uptime = process.uptime();
-  const mem = process.memoryUsage();
-
-  const queueStats = QueueService.getInstance().getStats();
-  const alarmStats = AlarmService.getInstance().getStats();
-  const connectedClients = getConnectedClients();
+  const mem    = process.memoryUsage();
+  const qs     = queueService.status();
 
   logger.debug('Stats abgerufen', { requestId: req.requestId });
 
   res.json({
     ok: true,
     server: {
-      version: process.env.npm_package_version || '1.0.0',
-      nodeEnv: config.server.nodeEnv,
-      uptime: Math.floor(uptime),
+      version:     process.env.npm_package_version || '1.0.0',
+      nodeEnv:     config.server.nodeEnv,
+      uptime:      Math.floor(uptime),
       uptimeHuman: _formatUptime(uptime),
-      pid: process.pid,
+      pid:         process.pid,
       memory: {
-        heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
-        heapTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
-        rssMB: Math.round(mem.rss / 1024 / 1024),
+        heapUsedMB:  Math.round(mem.heapUsed  / 1_048_576),
+        heapTotalMB: Math.round(mem.heapTotal / 1_048_576),
+        rssMB:       Math.round(mem.rss       / 1_048_576),
       },
     },
-    queue: queueStats,
-    alarm: alarmStats,
-    websocket: { connectedClients },
+    queue: {
+      running:  qs.running,
+      waiting:  qs.waiting,
+      maxSize:  qs.maxSize,
+    },
+    websocket: {
+      connectedClients: getConnectedClients(),
+    },
     rtp: {
-      host: config.rtp.host,
-      port: config.rtp.port,
-      codec: config.rtp.codec,
+      host:    config.rtp.host,
+      port:    config.rtp.port,
+      codec:   config.rtp.codec,
       bitrate: config.rtp.bitrate,
     },
     timestamp: new Date().toISOString(),
@@ -76,19 +60,9 @@ router.get('/', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /history
+// GET /api/stats/history
 // ---------------------------------------------------------------------------
 
-/**
- * GET /history
- * Gibt die letzten Alarmierungen zurück.
- *
- * Query:
- *   limit {number} – Optional. Anzahl Einträge (1–100). Default: 50.
- *
- * Response:
- *   { ok: true, total, limit, history: [...] }
- */
 router.get('/history', [
   query('limit')
     .optional()
@@ -97,18 +71,15 @@ router.get('/history', [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({
-        ok: false,
-        errors: errors.array(),
-      });
+      return res.status(400).json({ ok: false, errors: errors.array() });
     }
 
-    const limit = parseInt(req.query.limit, 10) || 50;
-    const history = AlarmService.getInstance().getHistory(limit);
+    const limit   = parseInt(req.query.limit, 10) || 50;
+    const history = historyService.getLast(limit);
 
     res.json({
-      ok: true,
-      total: history.length,
+      ok:      true,
+      total:   history.length,
       limit,
       history,
     });
@@ -118,14 +89,7 @@ router.get('/history', [
 });
 
 // ---------------------------------------------------------------------------
-// Hilfsfunktionen
-// ---------------------------------------------------------------------------
 
-/**
- * Formatiert Sekunden als lesbare Zeitangabe.
- * @param {number} seconds
- * @returns {string}
- */
 function _formatUptime(seconds) {
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
