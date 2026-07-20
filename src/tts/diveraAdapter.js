@@ -43,6 +43,29 @@ const SECTION_PATTERNS = [
 const ORT_ZUSATZ_PATTERN = /^(?:Ortzusatz|Einsatzortzusatz|Zusatz|Objekt|Gebäude|Etage|Stockwerk)[:\s]/i;
 
 /**
+ * Normalisiert Einheitenzusätze im Adress-/Ortstext für bessere TTS-Ausgabe.
+ *
+ * Beispiele:
+ *   "WF-Halchter"   → "WF Halchter"
+ *   "WF-Süd (07)"  → "WF Süd 7"
+ *   "WF-Süd 07"    → "WF Süd 7"
+ *
+ * Der Bindestrich wird entfernt; führende Nullen in Klammer-/Freizahlen
+ * ebenfalls, damit replaceNumbers() später "sieben" daraus macht.
+ * @param {string} text
+ * @returns {string}
+ */
+function normalizeUnitLabels(text) {
+  return text
+    // WF-Halchter → WF Halchter  (allgemeiner Bindestrich nach Einheitenpräfix)
+    .replace(/\b(WF|LF|HLF|TLF|FF|BF)-([A-ZäöüÄÖÜ][a-zA-ZäöüÄÖÜ]+)/g, '$1 $2')
+    // Klammern mit führenden Nullen: (07) → 7
+    .replace(/\(0*(\d+)\)/g, '$1')
+    // Führende Nullen vor Ziffern: 07 → 7 (nur nach Leerzeichen / Zeilenstart)
+    .replace(/(\s)0+(\d)/g, '$1$2');
+}
+
+/**
  * Baut aus dem Divera-Webhook-Payload einen Rohtext für processAlarm() zusammen.
  * @param {object} payload
  * @returns {string} Rohtext
@@ -50,7 +73,7 @@ const ORT_ZUSATZ_PATTERN = /^(?:Ortzusatz|Einsatzortzusatz|Zusatz|Objekt|Gebäud
 function adaptDiveraPayload(payload) {
   const title   = (payload.title   || '').trim();
   const rawText = (payload.text    || '').trim();
-  const address = (payload.address || '').trim();
+  const address = normalizeUnitLabels((payload.address || '').trim());
 
   const textLines      = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const descLines      = [];
@@ -68,7 +91,7 @@ function adaptDiveraPayload(payload) {
     if (inRemovedSection) {
       if (ORT_ZUSATZ_PATTERN.test(line)) {
         inRemovedSection = false;
-        const val = line.replace(ORT_ZUSATZ_PATTERN, '').trim();
+        const val = normalizeUnitLabels(line.replace(ORT_ZUSATZ_PATTERN, '').trim());
         if (val) zusatzLines.push(val);
       }
       continue;
@@ -76,7 +99,7 @@ function adaptDiveraPayload(payload) {
 
     // Einsatzortzusatz
     if (ORT_ZUSATZ_PATTERN.test(line)) {
-      const val = line.replace(ORT_ZUSATZ_PATTERN, '').trim();
+      const val = normalizeUnitLabels(line.replace(ORT_ZUSATZ_PATTERN, '').trim());
       if (val) zusatzLines.push(val);
       continue;
     }
@@ -85,7 +108,7 @@ function adaptDiveraPayload(payload) {
     if (TEXT_DROP_PATTERNS.some(p => p.test(line))) continue;
 
     // Freitext-Beschreibung sammeln
-    descLines.push(line);
+    descLines.push(normalizeUnitLabels(line));
   }
 
   // Rohtext aufbauen
@@ -111,4 +134,4 @@ function adaptDiveraPayload(payload) {
   return combined;
 }
 
-module.exports = { adaptDiveraPayload };
+module.exports = { adaptDiveraPayload, normalizeUnitLabels };
