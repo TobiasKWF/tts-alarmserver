@@ -2,21 +2,16 @@
 
 /**
  * @file tts/diveraAdapter.js
- * @description Divera-Adapter: Wandelt Divera 24/7 Webhook-JSON in einen
- * assemblierten Rohtext um, der anschließend von processAlarm() verarbeitet wird.
+ * @description Divera-Adapter: Baut aus dem Divera-Webhook-Payload einen
+ * Rohtext für processAlarm() zusammen.
  *
- * Der Adapter:
- *   1. Filtert Metadaten-Zeilen aus dem text-Feld (Datum, Zeit, Einheiten …)
- *   2. Hängt die Freitextbeschreibung hinter den Titel
- *   3. Fügt Einsatzort und Einsatzortzusatz als eigene Sektionen an
- *
- * buildSpeechText() und enhanceSpeech() werden NICHT hier aufgerufen –
- * das übernimmt processAlarm() in einem einzigen Durchlauf.
+ * buildSpeechText() und enhanceSpeech() werden NICHT hier aufgerufen.
+ * Das übernimmt processAlarm() in einem einzigen Durchlauf.
  */
 
 const logger = require('../utils/logger').child({ service: 'DiveraAdapter' });
 
-/** Zeilen im text-Feld die NICHT vorgelesen werden sollen. */
+/** Metadaten-Zeilen die komplett verworfen werden. */
 const TEXT_DROP_PATTERNS = [
   /^Datum[:\s]/i,
   /^Zeit[:\s]/i,
@@ -28,45 +23,72 @@ const TEXT_DROP_PATTERNS = [
   /^Status[:\s]/i,
   /^Rückmeldung/i,
   /^[-=*_]{3,}$/,
-  /^(?:WF|LF|HLF|TLF|DLK|RW|GW|KTW|RTW|NEF|ELW|MTF|TSF|MLF)\s+\d/i,
+  /^(?:WF|LF|HLF|TLF|DLK|RW|GW|KTW|RTW|NEF|ELW|MTF|TSF|MLF)\s+/i,
   /^Florian\s/i,
   /^Heros\s/i,
 ];
 
-/** Zeilen die als Einsatzortzusatz behandelt werden. */
+/** Sektions-Header die eine zu verwerfende Sektion einleiten. */
+const SECTION_PATTERNS = [
+  /^-{3,}\s*Einheiten\s*-{3,}/i,
+  /^-{3,}\s*Fahrzeuge\s*-{3,}/i,
+  /^-{3,}\s*Kräfte\s*-{3,}/i,
+  /^-{3,}\s*Schleifen\s*-{3,}/i,
+  /^-{3,}\s*Rückmeldungen\s*-{3,}/i,
+  /^-{3,}\s*Status\s*-{3,}/i,
+  /^-{3,}\s*Alarmierung\s*-{3,}/i,
+];
+
+/** Einsatzortzusatz-Header. */
 const ORT_ZUSATZ_PATTERN = /^(?:Ortzusatz|Einsatzortzusatz|Zusatz|Objekt|Gebäude|Etage|Stockwerk)[:\s]/i;
 
 /**
  * Baut aus dem Divera-Webhook-Payload einen Rohtext für processAlarm() zusammen.
- *
  * @param {object} payload
- * @param {string} [payload.title]   - Alarmstichwort (z.B. "H V U-1")
- * @param {string} [payload.text]    - Freitext (kann Metadaten + Einsatzortzusatz enthalten)
- * @param {string} [payload.address] - Einsatzadresse
- * @returns {string} Rohtext für buildSpeechText()
+ * @returns {string} Rohtext
  */
 function adaptDiveraPayload(payload) {
-  const title    = (payload.title   || '').trim();
-  const rawText  = (payload.text    || '').trim();
-  const address  = (payload.address || '').trim();
+  const title   = (payload.title   || '').trim();
+  const rawText = (payload.text    || '').trim();
+  const address = (payload.address || '').trim();
 
-  const textLines   = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const descLines   = [];
-  const zusatzLines = [];
+  const textLines      = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const descLines      = [];
+  const zusatzLines    = [];
+  let inRemovedSection = false;
 
   for (const line of textLines) {
-    if (TEXT_DROP_PATTERNS.some(p => p.test(line))) continue;
+    // Sektions-Header erkannt → ab hier Einheiten/Fahrzeuge etc. nicht sammeln
+    if (SECTION_PATTERNS.some(p => p.test(line))) {
+      inRemovedSection = true;
+      continue;
+    }
 
+    // Innerhalb verworfener Sektion: nur Einsatzortzusatz-Header lässt uns raus
+    if (inRemovedSection) {
+      if (ORT_ZUSATZ_PATTERN.test(line)) {
+        inRemovedSection = false;
+        const val = line.replace(ORT_ZUSATZ_PATTERN, '').trim();
+        if (val) zusatzLines.push(val);
+      }
+      continue;
+    }
+
+    // Einsatzortzusatz
     if (ORT_ZUSATZ_PATTERN.test(line)) {
       const val = line.replace(ORT_ZUSATZ_PATTERN, '').trim();
       if (val) zusatzLines.push(val);
       continue;
     }
 
+    // Metadaten-Zeile verwerfen
+    if (TEXT_DROP_PATTERNS.some(p => p.test(line))) continue;
+
+    // Freitext-Beschreibung sammeln
     descLines.push(line);
   }
 
-  // Rohtext aufbauen: Titel + Beschreibung, dann Einsatzort, dann Zusatz
+  // Rohtext aufbauen
   const parts = [];
 
   const titleLine = [title, ...descLines].filter(Boolean).join(', ');
