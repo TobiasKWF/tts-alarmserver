@@ -3,27 +3,22 @@
 /**
  * @file server.js
  * @description Einstiegspunkt fuer systemd / node server.js.
- * Erstellt einen HTTP-Server (statt app.listen), damit WebSocket-Upgrades
- * funktionieren. Initialisiert Dashboard-WS (v3.1) und bestehenden WS-Service.
  */
 
 require('dotenv').config();
 
-const http                    = require('http');
-const { createApp }           = require('./src/app');
-const config                  = require('./src/config');
-const logger                  = require('./src/logging/logger');
-const { initWebSocket }       = require('./src/services/websocketService');
-const { initDashboardWS }     = require('./src/websocket/server');
+const http                = require('http');
+const app                 = require('./src/app');
+const config              = require('./src/config');
+const logger              = require('./src/logging/logger');
+const { initWebSocket }   = require('./src/services/websocketService');
+const { initDashboardWS } = require('./src/websocket/server');
 
 const PORT = config.server.port;
 const HOST = config.server.host;
 
-// HTTP-Server explizit erstellen – noetig fuer WebSocket-Upgrades
-const app    = createApp();
 const server = http.createServer(app);
 
-// WebSocket-Services initialisieren
 initWebSocket(server);
 initDashboardWS(server);
 
@@ -39,7 +34,7 @@ server.listen(PORT, HOST, () => {
 });
 
 server.on('error', (err) => {
-  logger.error('Server-Fehler:', { error: err.message });
+  logger.error('Server-Fehler', { error: err.message });
   process.exit(1);
 });
 
