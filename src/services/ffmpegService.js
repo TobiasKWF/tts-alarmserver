@@ -111,27 +111,17 @@ function buildPitchFilter(semitones, sampleRate) {
  */
 async function wavToRtp(inputPath, outputPath) {
   const { codec, sampleRate, channels } = config.rtp;
-  const pitchSemitones = config.ffmpeg.pitchSemitones;
 
-  // Pitch-Filter nur wenn konfiguriert (spart CPU bei pitchSemitones=0)
-  // Input-Samplerate von Piper ist 22050 Hz
-  const PIPER_SAMPLE_RATE = 22050;
-  const pitchFilter = buildPitchFilter(pitchSemitones, PIPER_SAMPLE_RATE);
-
-  const ffmpegArgs = ['-y', '-i', inputPath];
-
-  if (pitchFilter) {
-    ffmpegArgs.push('-af', pitchFilter);
-    logger.debug(`ffmpegService: Pitch-Shift ${pitchSemitones > 0 ? '+' : ''}${pitchSemitones} Halbтöne aktiv (Filter: ${pitchFilter})`);
-  }
-
-  ffmpegArgs.push(
-    '-ar',     String(sampleRate),
-    '-ac',     String(channels),
+  await runFfmpeg([
+    '-y',
+    '-i', inputPath,
+    '-ar', String(sampleRate),
+    '-ac', String(channels),
     '-acodec', codec,
-    '-f',      'rtp',
+    '-f', 'rtp',
     outputPath,
-  );
+  ]);
+}
 
   await runFfmpeg(ffmpegArgs);
 }
