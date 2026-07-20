@@ -1,40 +1,64 @@
 'use strict';
 
 /**
- * TTS Alarmserver v3 - Einstiegspunkt
- * Startet den HTTP-Server und initialisiert alle Services.
+ * @file server.js
+ * @description Einstiegspunkt fuer systemd / node server.js.
+ * Erstellt einen HTTP-Server (statt app.listen), damit WebSocket-Upgrades
+ * funktionieren. Initialisiert Dashboard-WS (v3.1) und bestehenden WS-Service.
  */
 
-const app = require('./src/app');
-const config = require('./src/config');
-const logger = require('./src/logging/logger');
+require('dotenv').config();
+
+const http                    = require('http');
+const { createApp }           = require('./src/app');
+const config                  = require('./src/config');
+const logger                  = require('./src/logging/logger');
+const { initWebSocket }       = require('./src/services/websocketService');
+const { initDashboardWS }     = require('./src/websocket/server');
 
 const PORT = config.server.port;
 const HOST = config.server.host;
 
-const server = app.listen(PORT, HOST, () => {
-  logger.info(`TTS Alarmserver v3 gestartet auf http://${HOST}:${PORT}`);
+// HTTP-Server explizit erstellen – noetig fuer WebSocket-Upgrades
+const app    = createApp();
+const server = http.createServer(app);
+
+// WebSocket-Services initialisieren
+initWebSocket(server);
+initDashboardWS(server);
+
+server.listen(PORT, HOST, () => {
+  const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
+  logger.info('TTS-Alarmserver v3.1 gestartet', {
+    host:        HOST,
+    port:        PORT,
+    dashboard:   `http://${displayHost}:${PORT}/dashboard`,
+    dashboardWS: `ws://${displayHost}:${PORT}/ws/dashboard`,
+    pid:         process.pid,
+  });
 });
 
 server.on('error', (err) => {
-  logger.error('Server-Fehler:', err);
+  logger.error('Server-Fehler:', { error: err.message });
   process.exit(1);
 });
 
-process.on('SIGTERM', async () => {
-  logger.info('SIGTERM empfangen – Server wird beendet...');
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM empfangen \u2013 Server wird beendet...');
   server.close(() => process.exit(0));
 });
 
-process.on('SIGINT', async () => {
-  logger.info('SIGINT empfangen – Server wird beendet...');
+process.on('SIGINT', () => {
+  logger.info('SIGINT empfangen \u2013 Server wird beendet...');
   server.close(() => process.exit(0));
 });
 
 process.on('uncaughtException', (err) => {
-  logger.error('Nicht abgefangene Exception:', err);
+  logger.error('Uncaught Exception', { error: err.message, stack: err.stack });
+  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
-  logger.error('Nicht behandelte Promise-Ablehnung:', reason);
+  logger.error('Unhandled Rejection', { reason: String(reason) });
+  process.exit(1);
 });
