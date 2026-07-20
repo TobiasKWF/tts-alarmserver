@@ -27,7 +27,7 @@ const logger     = require('../logging/logger');
 const { makeTempPath, ensureTmpDir } = require('../utils/tempFiles');
 
 // Raw-PCM Parameter die Piper mit thorsten-Stimmen ausgibt
-const PCM_SAMPLE_RATE  = 22050;
+const PCM_SAMPLE_RATE  = 16000;
 const PCM_CHANNELS     = 1;
 const PCM_BIT_DEPTH    = 16;
 
