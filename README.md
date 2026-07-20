@@ -59,17 +59,17 @@ Datum: 20.07.2026
 Zeit: 10:02
 
 Einheiten:
-WF 21-43-8
-WF 21-41-2
+WF 99-99-1
+WF 99-99-2
 
 Ort:
-Oderwald Bauwagen Kindergarten
+Bienenwald Bauwagen 
 ```
 
 Resultierende Durchsage:
 
 ```
-Brand zwei. Einsatzort: Oderwald Bauwagen Kindergarten.
+Brand zwei. Einsatzort: Bienenwald Bauwagen.
 ```
 
 Mehr wird **nicht** gesprochen.
