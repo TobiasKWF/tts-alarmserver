@@ -4,31 +4,38 @@
  * Mapping: Straßenkürzel → natürliche deutsche Aussprache.
  *
  * Abgedeckt:
- *   Autobahnen  (A2, A39, A391)
+ *   Autobahnen    (A2, A39, A391)
  *   Bundesstraßen (B6, B248)
  *   Landesstraßen (L615)
- *   Kreisstraßen (K53)
+ *   Kreisstraßen  (K53)
  *   Straßenabkürzungen (Str., HsNr., …)
+ *
+ * Zahlen < 100  werden als Ganzzahl gesprochen (A36 → Autobahn sechsunddreißig)
+ * Zahlen >= 100 werden ziffernweise gesprochen  (L495 → Landesstraße vier neun fünf)
+ * Das kürzt die Silbenzahl erheblich und beschleunigt die TTS-Synthese.
  */
 
 const { numberToWords } = require('../../utils/numbers');
 
-/**
- * Präfix-Mapping für Straßentypen.
- * Key: Buchstabe(n), Value: ausgeschriebener Typ
- */
 const ROAD_PREFIXES = {
-  A:  'Autobahn',
-  B:  'Bundesstraße',
-  L:  'Landesstraße',
-  K:  'Kreisstraße',
-  S:  'Staatsstraße',
-  E:  'Europastraße',
+  A: 'Autobahn',
+  B: 'Bundesstraße',
+  L: 'Landesstraße',
+  K: 'Kreisstraße',
+  S: 'Staatsstraße',
+  E: 'Europastraße',
 };
 
-/**
- * Allgemeine Abkürzungsersetzungen (Straße, Platz, etc.)
- */
+const DIGIT_WORDS = {
+  '0': 'null', '1': 'eins', '2': 'zwei', '3': 'drei', '4': 'vier',
+  '5': 'fünf', '6': 'sechs', '7': 'sieben', '8': 'acht', '9': 'neun',
+};
+
+/** Spricht eine Zahl ziffernweise aus (L495 → "vier neun fünf"). */
+function digitByDigit(numStr) {
+  return numStr.split('').map(d => DIGIT_WORDS[d] || d).join(' ');
+}
+
 const ABBREVIATION_MAP = [
   [/\bStr\.?\b/g,    'Straße'],
   [/\bHsNr\.?\b/gi, 'Hausnummer'],
@@ -52,24 +59,19 @@ const ABBREVIATION_MAP = [
 
 /**
  * Ersetzt Straßenkennzeichnungen im Text durch natürliche Sprache.
- * Beispiel: "A2" → "Autobahn zwei", "L615" → "Landesstraße sechshundertfünfzehn"
- * @param {string} text
- * @returns {string}
+ * Zahlen < 100  als Wort:          A36  → Autobahn sechsunddreißig
+ * Zahlen >= 100 ziffernweise:      L495 → Landesstraße vier neun fünf
  */
 function replaceRoadCodes(text) {
   return text.replace(/\b([ABLKSE])(\d{1,4})\b/g, (match, prefix, numStr) => {
     const roadType = ROAD_PREFIXES[prefix];
     if (!roadType) return match;
     const num = parseInt(numStr, 10);
-    return roadType + ' ' + numberToWords(num);
+    const numSpoken = num < 100 ? numberToWords(num) : digitByDigit(numStr);
+    return roadType + ' ' + numSpoken;
   });
 }
 
-/**
- * Ersetzt allgemeine Straßenabkürzungen.
- * @param {string} text
- * @returns {string}
- */
 function replaceAbbreviations(text) {
   let result = text;
   for (const [pattern, replacement] of ABBREVIATION_MAP) {
