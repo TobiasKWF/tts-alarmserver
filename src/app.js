@@ -11,6 +11,7 @@ const errorHandler = require('./middleware/errorHandler');
 const alarmRoutes = require('./routes/alarm');
 const statusRoutes = require('./routes/status');
 const historyRoutes = require('./routes/history');
+const diveraRoutes = require('./routes/divera');
 const logger = require('./logging/logger');
 
 const app = express();
@@ -29,6 +30,7 @@ app.use(requestLogger);
 app.use('/api/alarm', alarmRoutes);
 app.use('/api/status', statusRoutes);
 app.use('/api/history', historyRoutes);
+app.use('/api/divera', diveraRoutes);
 
 // 404
 app.use((req, res) => {

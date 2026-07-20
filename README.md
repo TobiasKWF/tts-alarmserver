@@ -35,13 +35,15 @@ Die Durchsage enthält **ausschließlich** Alarmstichwort und Einsatzort – all
 - 🔊 **Piper TTS** – hochwertige deutsche Sprachsynthese (Thorsten-Stimme)
 - 📡 **RTP-Streaming** – Multicast und Unicast via ffmpeg, G.711 µ-law
 - 🚒 **Intelligente Alarmtext-Bereinigung** – nur Alarmstichwort + Einsatzort werden gesprochen
+- 🏢 **Einsatzortzusatz-Erkennung** – OG 2, EG, Hinterhaus, Tor 3 etc. werden erkannt und gesprochen
 - 🗣️ **Sprachoptimierung** – `B2 → Brand zwei`, `A39 → Autobahn neununddreißig`, `Str. → Straße`
 - 🔢 **Zahlenkonvertierung** – `43 → dreiundvierzig`, `105 → einhundertfünf`
 - 🔤 **Unicode-Reparatur** – Windows-1252-Fehlkodierungen, Zero-Width-Zeichen, NFC-Normalisierung
 - 📋 **Serialisierungsqueue** – Alarmierungen laufen nacheinander, kein Audio-Überlapp
 - 📝 **Strukturiertes Logging** – Request-ID, Dauer, bereinigter/gesprochener Text pro Alarm
 - 🛡️ **Fehlertoleranz** – Timeouts auf allen externen Prozessen, kein Server-Absturz bei Einzelfehlern
-- 📊 **REST API** – `/api/alarm`, `/api/status`, `/api/history`
+- 📊 **REST API** – `/api/alarm`, `/api/divera`, `/api/status`, `/api/history`
+- 🔔 **Divera 24/7 Integration** – Direkter Webhook-Empfang inkl. Node-RED msg.payload
 
 ---
 
@@ -77,28 +79,32 @@ Mehr wird **nicht** gesprochen.
 ## Architektur
 
 ```
-HTTP POST /api/alarm
-        │
-        ▼
-  alarmCleaner.js       ← Alarmtext bereinigen (nur Stichwort + Ort)
-        │
-        ▼
-  speechEnhancer.js     ← Unicode · Alarm-Codes · Straßen · Abkürzungen · Zahlen
-        │
-        ▼
-  queueService.js       ← Serialisierung (Concurrency = 1)
-        │
-        ▼
-  piperService.js       ← Text → WAV (mit Timeout + intelligentem Chunk-Split)
-        │
-        ▼
-  ffmpegService.js      ← WAV-Merge + RTP-Konvertierung (G.711 µ-law)
-        │
-        ▼
-  rtpStreamer.js        ← RTP-Stream an Lautsprecheranlage
-        │
-        ▼
-  alarmLog.js           ← Protokollierung: requestId · Dauer · Texte · Status
+HTTP POST /api/alarm          HTTP POST /api/divera
+        │                              │
+        │                    diveraAdapter.js   ← title / text / address bereinigen
+        │                              │
+        └──────────────────────────────┘
+                          │
+                          ▼
+                  alarmCleaner.js       ← Alarmtext bereinigen (nur Stichwort + Ort + Zusatz)
+                          │
+                          ▼
+                  speechEnhancer.js     ← Unicode · Alarm-Codes · Straßen · Abkürzungen · Zahlen
+                          │
+                          ▼
+                  queueService.js       ← Serialisierung (Concurrency = 1)
+                          │
+                          ▼
+                  piperService.js       ← Text → WAV (mit Timeout + intelligentem Chunk-Split)
+                          │
+                          ▼
+                  ffmpegService.js      ← WAV-Merge + RTP-Konvertierung (G.711 µ-law)
+                          │
+                          ▼
+                  rtpStreamer.js        ← RTP-Stream an Lautsprecheranlage
+                          │
+                          ▼
+                  alarmLog.js           ← Protokollierung: requestId · Dauer · Texte · Status
 ```
 
 ---
@@ -116,7 +122,8 @@ tts-alarmserver/
 │   │   ├── logger.js                # Schlankes strukturiertes Logging
 │   │   └── alarmLog.js              # Alarm-spezifisches Protokoll
 │   ├── tts/
-│   │   ├── alarmCleaner.js          # Regelbasierte Alarmtext-Bereinigung
+│   │   ├── alarmCleaner.js          # Regelbasierte Alarmtext-Bereinigung + Einsatzortzusatz
+│   │   ├── diveraAdapter.js         # Divera-Payload → bereinigter TTS-Text
 │   │   ├── speechEnhancer.js        # TTS-Optimierungspipeline
 │   │   └── mappings/
 │   │       ├── alarmMapping.js      # B2 → "Brand zwei", TH1 → "Technische Hilfe eins"
@@ -137,6 +144,7 @@ tts-alarmserver/
 │   │   └── rtpStreamer.js            # RTP-Streaming via ffmpeg
 │   ├── routes/
 │   │   ├── alarm.js                 # POST /api/alarm
+│   │   ├── divera.js                # POST /api/divera (Divera 24/7 Webhook)
 │   │   ├── status.js                # GET /api/status
 │   │   └── history.js               # GET /api/history
 │   └── middleware/
@@ -228,6 +236,7 @@ Alle Einstellungen in `.env`. Vollständige Referenz: [`.env.example`](.env.exam
 | `QUEUE_MAX_SIZE` | `20` | Max. Warteschlangengröße |
 | `HISTORY_MAX_ENTRIES` | `100` | Max. Einträge in der Alarmhistorie |
 | `LOG_LEVEL` | `info` | `error`\|`warn`\|`info`\|`debug` |
+| `DIVERA_GONG` | *(leer)* | Gong-Dateiname (ohne `.wav`) für Divera-Alarme |
 
 ---
 
@@ -269,6 +278,81 @@ Content-Type: application/json
 ```
 
 Der Body kann auch als `{ "alarmtext": "..." }` oder als Plain-Text übergeben werden.
+
+---
+
+### POST /api/divera
+
+Divera 24/7 Webhook-Empfänger. Akzeptiert den **unveränderten `msg.payload`** aus einem Node-RED Divera-Webhook-Node.
+
+Die Felder `title`, `text` und `address` werden bereinigt und zu einem natürlich klingenden TTS-Text zusammengebaut.
+Im `address`-Feld enthaltene **Einsatzortzusätze** (z.B. `OG 2`, `EG`, `Hinterhaus`, `Tor 3`) werden automatisch erkannt und gesprochen.
+
+```http
+POST /api/divera
+Content-Type: application/json
+
+{
+  "title": "B2 Wohnungsbrand",
+  "text": "Rauch aus dem Dachgeschoss, Personen gemeldet",
+  "address": "Musterstraße 12, 38533 Vordorf OG 2",
+  "priority": 1
+}
+```
+
+> 💡 **Node-RED**: Der HTTP-Request-Node sendet `msg.payload` direkt als JSON-Body – keine Transformation nötig.
+
+**Antwort:** `202 Accepted`
+```json
+{
+  "ok": true,
+  "alarmId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "position": 1,
+  "spokenText": "Brand zwei Wohnungsbrand. Einsatzort: Musterstraße zwölf, Vordorf, Obergeschoss zwei.",
+  "message": "Divera-Alarm in Queue eingereiht (Position 1)"
+}
+```
+
+**Pflichtfelder:** Mindestens `title` **oder** `text` muss angegeben sein.
+
+**Alle Felder:**
+
+| Feld | Typ | Pflicht | Beschreibung |
+|---|---|---|---|
+| `title` | string | nein* | Einsatzstichwort (z.B. `B2 Wohnungsbrand`) |
+| `text` | string | nein* | Einsatzbeschreibung |
+| `address` | string | nein | Einsatzadresse inkl. optionalem Zusatz |
+| `priority` | integer 1–10 | nein | Queue-Priorität (Standard: Konfigurationswert) |
+
+*Mindestens `title` oder `text` ist erforderlich.
+
+#### Erkannte Einsatzortzusätze in `address`
+
+Folgende Muster am Ende des `address`-Feldes werden automatisch als Zusatz erkannt:
+
+| Muster | Beispiel | Gesprochen |
+|---|---|---|
+| `EG` | `Hauptstr. 5 EG` | `… Erdgeschoss` |
+| `OG <n>` | `Bahnhofstr. 3 OG 2` | `… Obergeschoss zwei` |
+| `DG` | `Ringstr. 8 DG` | `… Dachgeschoss` |
+| `UG` | `Marktplatz 1 UG` | `… Untergeschoss` |
+| `Hinterhaus` | `Lindenstr. 7 Hinterhaus` | `… Hinterhaus` |
+| `Tor <n>` | `Industrieweg 12 Tor 3` | `… Tor drei` |
+| `Aufgang <n>` | `Parkstr. 4 Aufgang 2` | `… Aufgang zwei` |
+
+#### Einsatzortzusatz als eigene Sektion (Freitext-Alarm)
+
+Bei Freitext-Alarmen über `/api/alarm` kann der Zusatz auch als eigene Zeile übergeben werden:
+
+```
+B2 Wohnungsbrand
+
+Einsatzort:
+Musterstraße 12, Vordorf
+
+Einsatzortzusatz:
+Obergeschoss 2
+```
 
 ---
 

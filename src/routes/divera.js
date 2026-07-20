@@ -2,14 +2,18 @@
 
 /**
  * @file routes/divera.js
- * @description POST /divera – Divera 24/7 Webhook-Adapter.
+ * @description POST /api/divera – Divera 24/7 Webhook-Adapter.
  *
- * Empfängt Webhook-Calls von Divera 24/7 und wandelt sie in
- * Alarmierungs-Payloads um, die in die Queue eingereiht werden.
+ * Empfängt Webhook-Calls von Divera 24/7 (direkt oder via Node-RED)
+ * und wandelt sie in Alarmierungs-Payloads um, die in die Queue eingereiht werden.
  *
- * Divera sendet bei einem Alarm ein JSON-Objekt mit Einsatzdaten.
- * Dieser Adapter extrahiert die relevanten Felder und erstellt
- * einen TTS-Text, der über die Standard-Announce-Pipeline verarbeitet wird.
+ * Der unveränderte Node-RED msg.payload wird entgegengenommen.
+ * Felder title, text und address werden bereinigt verarbeitet:
+ *   - title   → Einsatzstichwort (erste gesprochene Information)
+ *   - text    → Einsatzbeschreibung (zweite Information)
+ *   - address → Einsatzort inkl. optionalem Einsatzortzusatz (OG 2, EG, Tor 3 …)
+ *
+ * Die Bereinigung und Sprachoptimierung übernimmt diveraAdapter.js.
  *
  * Divera Webhook-Dokumentation:
  *   https://api.divera247.com/#tag/Alarmierung/operation/postAlarm
@@ -28,6 +32,7 @@ const { QueueService } = require('../services/queueService');
 const eventBus = require('../events/eventBus');
 const { ValidationError, QueueFullError } = require('../errors');
 const config = require('../config');
+const { adaptDiveraPayload } = require('../tts/diveraAdapter');
 
 const router = Router();
 
@@ -66,25 +71,25 @@ const diveraValidation = [
 ];
 
 // ---------------------------------------------------------------------------
-// POST /divera
+// POST /api/divera
 // ---------------------------------------------------------------------------
 
 /**
- * POST /divera
+ * POST /api/divera
  * Divera 24/7 Webhook-Empfänger.
  *
- * Erwartet JSON-Body aus dem Divera-Webhook.
- * Extrahiert Einsatzart (title), Einsatztext (text) und Adresse (address)
- * und erstellt daraus einen sprechbaren TTS-Text.
+ * Akzeptiert den unveränderten Node-RED msg.payload aus dem Divera-Webhook.
+ * Extrahiert Einsatzart (title), Einsatztext (text) und Adresse (address),
+ * bereinigt und optimiert den Text für TTS und reiht ihn in die Queue ein.
  *
- * Body (Divera-Format):
+ * Body (Divera / Node-RED msg.payload Format):
  *   title       {string} – Einsatzart/Stichwort
  *   text        {string} – Einsatzbeschreibung
- *   address     {string} – Einsatzadresse
+ *   address     {string} – Einsatzadresse (kann Einsatzortzusatz enthalten)
  *   priority    {number} – Optionale Queue-Priorität (1–10)
  *
  * Response 202:
- *   { ok: true, alarmId, position, message }
+ *   { ok: true, alarmId, position, message, spokenText }
  */
 router.post('/', diveraValidation, (req, res, next) => {
   try {
@@ -104,8 +109,8 @@ router.post('/', diveraValidation, (req, res, next) => {
       );
     }
 
-    // TTS-Text aus Divera-Feldern zusammenbauen
-    const ttsText = _buildDiveraTtsText({ title, text, address });
+    // TTS-Text über diveraAdapter bereinigt aufbereiten
+    const spokenText = adaptDiveraPayload({ title, text, address });
     const alarmId = uuidv4();
 
     // Vorab-Gong: config.divera.gong → config.audio.defaultGong → null
@@ -121,17 +126,17 @@ router.post('/', diveraValidation, (req, res, next) => {
       title,
       address,
       gong: gong || '(kein Gong)',
-      textLength: text ? text.length : 0,
+      spokenText: spokenText.slice(0, 120),
     });
 
     const payload = {
       id: alarmId,
       requestId: req.requestId,
-      text: ttsText,
+      text: spokenText,
       voice: config.piper.defaultVoice,
       speed: config.piper.speed,
       volume: config.piper.volume,
-      gong,                 // Vorab-Gong: gesetzt via DIVERA_GONG in .env oder null
+      gong,
       rtpHost: config.rtp.host,
       rtpPort: config.rtp.port,
       source: 'divera',
@@ -141,7 +146,7 @@ router.post('/', diveraValidation, (req, res, next) => {
     eventBus.emit('alarm.received', {
       alarmId,
       requestId: req.requestId,
-      text: ttsText,
+      text: spokenText,
       source: 'divera',
       priority: priority || config.queue.defaultPriority,
     });
@@ -155,13 +160,14 @@ router.post('/', diveraValidation, (req, res, next) => {
     logger.info('Divera-Alarm eingereiht', {
       alarmId: id,
       position,
-      ttsText: ttsText.slice(0, 100),
+      spokenText: spokenText.slice(0, 100),
     });
 
     res.status(202).json({
       ok: true,
       alarmId: id,
       position,
+      spokenText,
       message: `Divera-Alarm in Queue eingereiht (Position ${position})`,
     });
   } catch (err) {
@@ -169,42 +175,5 @@ router.post('/', diveraValidation, (req, res, next) => {
     next(err);
   }
 });
-
-// ---------------------------------------------------------------------------
-// Hilfsfunktionen
-// ---------------------------------------------------------------------------
-
-/**
- * Baut einen sprechbaren TTS-Text aus den Divera-Feldern zusammen.
- *
- * Reihenfolge der Ausgabe:
- *   1. Alarmierung! (Einleitung)
- *   2. Einsatzart/Stichwort (title)
- *   3. Einsatzbeschreibung (text)
- *   4. Einsatzadresse (address)
- *
- * @param {object} opts
- * @param {string|undefined} opts.title
- * @param {string|undefined} opts.text
- * @param {string|undefined} opts.address
- * @returns {string}
- */
-function _buildDiveraTtsText({ title, text, address }) {
-  const parts = ['Alarmierung!'];
-
-  if (title) {
-    parts.push(title.trim());
-  }
-
-  if (text) {
-    parts.push(text.trim());
-  }
-
-  if (address) {
-    parts.push(`Einsatzort: ${address.trim()}`);
-  }
-
-  return parts.join(' ');
-}
 
 module.exports = router;
