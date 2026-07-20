@@ -3,6 +3,10 @@
 /**
  * @file routes/divera.js
  * @description POST /api/divera – Divera 24/7 Webhook-Adapter.
+ *
+ * Verarbeitung:
+ *   1. adaptDiveraPayload() baut den Rohtext aus title/text/address zusammen
+ *   2. processAlarm() übernimmt: buildSpeechText() + enhanceSpeech() + TTS + RTP
  */
 
 const { Router } = require('express');
@@ -44,39 +48,38 @@ router.post('/', diveraValidation, (req, res, next) => {
       );
     }
 
-    const spokenText = adaptDiveraPayload({ title, text, address });
-    const alarmId    = uuidv4();
-    const prio       = priority || config.queue.defaultPriority;
+    // Rohtext zusammenbauen (kein buildSpeechText/enhanceSpeech hier)
+    const rawText = adaptDiveraPayload({ title, text, address });
+    const alarmId = uuidv4();
+    const prio    = priority || config.queue.defaultPriority;
 
     logger.info('Divera-Webhook empfangen', {
       alarmId,
       requestId: req.requestId,
       title,
       address,
-      spokenText: spokenText.slice(0, 120),
     });
 
     eventBus.emit('alarm.received', {
       alarmId,
       requestId: req.requestId,
-      text: spokenText,
+      text: rawText,
       source: 'divera',
       priority: prio,
     });
 
-    // Alarm asynchron über Queue verarbeiten (TTS + RTP + DashboardState)
+    // processAlarm() übernimmt buildSpeechText() + enhanceSpeech() + TTS + RTP
     queueService.enqueue(
-      () => processAlarm(spokenText, alarmId),
-      { id: alarmId, priority: prio, source: 'divera', text: spokenText }
+      () => processAlarm(rawText, alarmId),
+      { id: alarmId, priority: prio, source: 'divera', text: rawText }
     ).catch(err => {
       logger.error('Divera Queue-Fehler', { alarmId, error: err.message });
     });
 
     res.status(202).json({
-      ok: true,
+      ok:      true,
       alarmId,
       position: queueService.status().waiting,
-      spokenText,
       message: 'Divera-Alarm in Queue eingereiht',
     });
 
