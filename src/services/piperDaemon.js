@@ -11,7 +11,7 @@
  * Piper wird mit --json-input --output-raw aufgerufen:
  *   - stdin: JSON-Zeilen  { "text": "...", "output_file": "..." }
  *     (output_file wird ignoriert wenn --output-raw gesetzt)
- *   - stdout: Raw PCM (16-bit signed LE, 22050 Hz mono) - wird zu WAV konvertiert
+ * stdout: Raw PCM (16-bit signed LE, mono; Samplerate aus der Modell-Konfiguration)
  *   - stderr: Fortschritts-/Debug-Ausgabe
  *
  * API:
@@ -27,7 +27,7 @@ const logger     = require('../logging/logger');
 const { makeTempPath, ensureTmpDir } = require('../utils/tempFiles');
 
 // Raw-PCM Parameter die Piper mit thorsten-Stimmen ausgibt
-const PCM_SAMPLE_RATE  = 16000;
+const PCM_SAMPLE_RATE = config.piper.outputSampleRate;
 const PCM_CHANNELS     = 1;
 const PCM_BIT_DEPTH    = 16;
 
