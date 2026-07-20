@@ -19,13 +19,11 @@ const config = {
    maxChunkLength: parseInt(process.env.PIPER_MAX_CHUNK || '500', 10),
    timeoutMs:      parseInt(process.env.PIPER_TIMEOUT_MS || '30000', 10),
    lengthScale:    parseFloat(process.env.PIPER_LENGTH_SCALE || '1.0'),
-   noiseScaleW:    parseFloat(process.env.PIPER_NOISE_SCALE_W || '0.8'),
   },
 
   ffmpeg: {
-    binary:         process.env.FFMPEG_BINARY             || 'ffmpeg',
-    timeoutMs:      parseInt(process.env.FFMPEG_TIMEOUT_MS || '60000', 10),
-    pitchSemitones: parseFloat(process.env.FFMPEG_PITCH_SEMITONES || '0'),
+    binary:    process.env.FFMPEG_BINARY             || 'ffmpeg',
+    timeoutMs: parseInt(process.env.FFMPEG_TIMEOUT_MS || '60000', 10),
   },
 
   alarm: {
