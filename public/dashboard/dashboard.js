@@ -52,20 +52,20 @@ btnFanfare.addEventListener('click', async () => {
   clearTimeout(fanfareTimer);
   btnFanfare.disabled = true;
   btnFanfare.className = 'btn-fanfare';
-  btnFanfareLabel.textContent = 'Spiele\u2026';
+  btnFanfareLabel.textContent = 'Spiele…';
 
   try {
-    const res = await fetch('/play-fanfare', {
+    const res = await fetch('/announce/fanfare', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ file: FANFARE_FILE }),
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     btnFanfare.className = 'btn-fanfare state-ok';
-    btnFanfareLabel.textContent = '\u2713 Gestartet';
+    btnFanfareLabel.textContent = '✓ Gestartet';
   } catch (_) {
     btnFanfare.className = 'btn-fanfare state-err';
-    btnFanfareLabel.textContent = '\u2717 Fehler';
+    btnFanfareLabel.textContent = '✗ Fehler';
     btnFanfare.disabled = false;
   }
 
