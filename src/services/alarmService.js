@@ -2,80 +2,73 @@
 
 /**
  * Alarm-Service – Haupt-Orchestrierung.
+ * Pipeline: rawText → clean → enhance → TTS(WAV) → merge WAV → RTP-Stream
  */
 
-const { buildSpeechText }    = require('../tts/alarmCleaner');
-const { enhanceSpeech }      = require('../tts/speechEnhancer');
-const { textToWavFiles }     = require('./piperService');
-const { processToRtp }       = require('./ffmpegService');
-const { streamRtp }          = require('../streaming/rtpStreamer');
-const { removeTempFiles }    = require('../utils/tempFiles');
-const { ensureTmpDir }       = require('../utils/tempFiles');
-const { logAlarm }           = require('../logging/alarmLog');
-const historyService         = require('./historyService');
-const dashboardState         = require('./dashboardState').getInstance();
-const logger                 = require('../logging/logger');
+const { buildSpeechText }  = require('../tts/alarmCleaner');
+const { enhanceSpeech }    = require('../tts/speechEnhancer');
+const { textToWavFiles }   = require('./piperService');
+const { mergeWavFiles }    = require('./ffmpegService');
+const { streamRtp }        = require('../streaming/rtpStreamer');
+const { ensureTmpDir,
+        makeTempPath,
+        removeTempFiles }  = require('../utils/tempFiles');
+const { logAlarm }         = require('../logging/alarmLog');
+const historyService       = require('./historyService');
+const DashboardState       = require('./dashboardState');
+const logger               = require('../logging/logger');
 
-/**
- * Verarbeitet eine eingehende Alarm-Anfrage vollständig.
- * @param {string} rawText    - Roher Alarmtext aus der HTTP-Anfrage
- * @param {string} requestId  - Eindeutige ID für Logging
- * @returns {Promise<{ cleanText: string, spokenText: string }>}
- */
 async function processAlarm(rawText, requestId) {
-  const startTime = Date.now();
-  const tempFiles = [];
-  let cleanText  = '';
-  let spokenText = '';
+  const startTime   = Date.now();
+  const tempFiles   = [];
+  let   cleanText   = '';
+  let   spokenText  = '';
 
-  // Sicherstellen dass TMP-Verzeichnis existiert (unabhängig vom aufrufenden Route)
   await ensureTmpDir();
 
+  const dashState = DashboardState.getInstance();
+
   try {
-    // 1+2. Bereinigen und aufbauen
+    // 1. Text bereinigen
     cleanText = buildSpeechText(rawText);
-    if (!cleanText) {
-      throw new Error('Kein verwertbarer Alarmtext nach Bereinigung');
-    }
-    logger.debug(`[${requestId}] Bereinigter Text: ${cleanText}`);
+    if (!cleanText) throw new Error('Kein verwertbarer Alarmtext nach Bereinigung');
 
-    // 3. Sprachoptimierung
+    // 2. Sprachoptimierung
     spokenText = enhanceSpeech(cleanText);
-    logger.debug(`[${requestId}] Optimierter Text: ${spokenText}`);
 
-    // 4. TTS → WAV
-    const wavFiles = await textToWavFiles(spokenText);
-    tempFiles.push(...wavFiles);
+    // 3. TTS → WAV-Chunks
+    const wavChunks = await textToWavFiles(spokenText);
+    tempFiles.push(...wavChunks);
 
-    // 5a. WAV → RTP-Datei zusammenführen + kodieren
-    const rtpFile = await processToRtp(wavFiles);
-    tempFiles.push(rtpFile);
+    // 4. WAV-Chunks zusammenführen (bei einem Chunk: direktes Copy)
+    const mergedWav = makeTempPath('_merged.wav');
+    tempFiles.push(mergedWav);
+    await mergeWavFiles(wavChunks, mergedWav);
 
-    // Dashboard: Durchsage als aktiv markieren
+    // 5. Dashboard: Durchsage aktiv markieren
     const wordCount   = spokenText.split(/\s+/).length;
     const estimatedMs = Math.max(2000, wordCount * 400);
-    dashboardState.setCurrentSpeech({
+    dashState.setCurrentSpeech({
       text:       spokenText,
       alarmId:    requestId,
-      voice:      process.env.PIPER_MODEL ? process.env.PIPER_MODEL.split('/').pop() : 'piper',
+      voice:      (process.env.PIPER_MODEL || 'piper').split('/').pop(),
       startedAt:  Date.now(),
       durationMs: estimatedMs,
     });
 
-    // 5b. RTP streamen
-    await streamRtp(rtpFile);
+    // 6. WAV direkt per RTP streamen (eine ffmpeg-Instanz: WAV → rtp://)
+    await streamRtp(mergedWav);
 
-    // 6. Protokollieren
+    // 7. Protokollieren
     const endTime = Date.now();
     logAlarm({ requestId, startTime, endTime, cleanText, spokenText, success: true });
     historyService.add({ requestId, startTime, endTime, cleanText, spokenText, success: true });
 
-    // Dashboard: Durchsage abgeschlossen
-    dashboardState.clearCurrentSpeech();
-    dashboardState.addToHistory({
+    dashState.clearCurrentSpeech();
+    dashState.addToHistory({
       alarmId:    requestId,
       text:       spokenText,
-      voice:      process.env.PIPER_MODEL ? process.env.PIPER_MODEL.split('/').pop() : 'piper',
+      voice:      (process.env.PIPER_MODEL || 'piper').split('/').pop(),
       finishedAt: endTime,
       success:    true,
     });
@@ -86,16 +79,14 @@ async function processAlarm(rawText, requestId) {
     const endTime = Date.now();
     logAlarm({ requestId, startTime, endTime, cleanText, spokenText, success: false, error: err.message });
     historyService.add({ requestId, startTime, endTime, cleanText, spokenText, success: false, error: err.message });
-
-    dashboardState.clearCurrentSpeech();
-    dashboardState.addToHistory({
+    dashState.clearCurrentSpeech();
+    dashState.addToHistory({
       alarmId:    requestId,
       text:       spokenText || cleanText,
       finishedAt: endTime,
       success:    false,
     });
-    dashboardState.addError(err);
-
+    dashState.addError({ message: err.message, ts: new Date().toISOString() });
     throw err;
 
   } finally {
