@@ -6,7 +6,7 @@
  * Behalten werden NUR:
  *   - Alarmtext (erste Zeile / Einsatzstichwort)
  *   - Einsatzort
- *   - Einsatzortzusatz (z.B. "OG 2", "Hinterhaus", "Bauwagen Kindergarten")
+ *   - Einsatzortzusatz / Objekt  → wird als "Einsatzobjekt:" ausgegeben
  *
  * Alles andere (Datum, Zeit, Einheiten, Fahrzeuge, Status …) wird verworfen.
  */
@@ -129,18 +129,39 @@ function extractOrtZusatz(addressLine) {
   return { base, zusatz };
 }
 
+/**
+ * Entfernt doppelt genannte Straßenkennzeichnungen (z. B. zweimal L495)
+ * aus einem zusammengesetzten Sprachtext.
+ * @param {string} text
+ * @returns {string}
+ */
+function deduplicateRoadRefs(text) {
+  // Matcht Straßenpräfix + Nummer als eigenständiges Wort
+  const seen = new Set();
+  return text.replace(/\b([ABLKSE]\d{1,4})\b/g, (match) => {
+    if (seen.has(match)) return '';
+    seen.add(match);
+    return match;
+  }).replace(/\s{2,}/g, ' ').trim();
+}
+
 function buildSpeechText(rawText) {
   const { alarmText, location, locationAdditional } = extractAlarmInfo(rawText);
 
+  // Einsatzort vor Zusammenbau deduplizieren
+  const locationClean = deduplicateRoadRefs(location);
+
   let speech = '';
   if (alarmText) speech += alarmText + '. ';
-  if (location) {
-    speech += 'Einsatzort: ' + location;
-    if (locationAdditional) speech += ', ' + locationAdditional;
-    speech += '.';
+  if (locationClean) {
+    speech += 'Einsatzort: ' + locationClean + '.';
+  }
+  // Einsatzobjekt explizit kennzeichnen (nicht als Nachsatz)
+  if (locationAdditional) {
+    speech += ' Einsatzobjekt: ' + locationAdditional + '.';
   }
 
   return speech.trim();
 }
 
-module.exports = { extractAlarmInfo, extractOrtZusatz, buildSpeechText };
+module.exports = { extractAlarmInfo, extractOrtZusatz, deduplicateRoadRefs, buildSpeechText };
