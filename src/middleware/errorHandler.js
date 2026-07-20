@@ -1,57 +1,24 @@
 'use strict';
 
 /**
- * @file middleware/errorHandler.js
- * @description Zentraler Express Error-Handler.
- * Behandelt alle Fehler konsistent und gibt strukturierte JSON-Antworten zurück.
- * Unterscheidet zwischen operationalen Fehlern (AlarmServerError) und
- * unerwarteten Programmfehlern.
+ * Globale Express-Fehlerbehandlung.
+ * Fängt alle nicht behandelten Fehler ab und gibt eine strukturierte Antwort zurück.
+ * Der Server wird NICHT beendet.
  */
 
-const logger = require('../utils/logger');
-const { AlarmServerError } = require('../errors');
+const logger = require('../logging/logger');
 
-/**
- * Zentraler Express Error-Handler (muss 4 Parameter haben).
- * @type {import('express').ErrorRequestHandler}
- */
 // eslint-disable-next-line no-unused-vars
-function errorHandler(err, req, res, next) {
-  const requestId = req.requestId || 'unknown';
-
-  if (err instanceof AlarmServerError) {
-    // Operationaler Fehler – erwartet und behandelbar
-    logger.warn('Operationaler Fehler', {
-      requestId,
-      code: err.code,
-      statusCode: err.statusCode,
-      message: err.message,
-      details: err.details,
-    });
-
-    return res.status(err.statusCode).json({
-      ...err.toJSON(),
-      requestId,
-    });
-  }
-
-  // Unerwarteter Programm-Fehler
-  logger.error('Unerwarteter Fehler', {
-    requestId,
-    message: err.message,
+module.exports = function errorHandler(err, req, res, next) {
+  const status = err.statusCode || err.status || 500;
+  logger.error(`Unbehandelter Fehler [${status}]: ${err.message}`, {
     stack: err.stack,
+    path: req.path,
+    method: req.method,
   });
 
-  // In Production keine Stack-Traces nach außen geben
-  const isDev = process.env.NODE_ENV !== 'production';
-
-  return res.status(500).json({
-    error: 'InternalServerError',
-    code: 'INTERNAL_ERROR',
-    message: isDev ? err.message : 'Ein interner Serverfehler ist aufgetreten.',
-    ...(isDev && { stack: err.stack }),
-    requestId,
+  res.status(status).json({
+    error: err.message || 'Interner Serverfehler',
+    status,
   });
-}
-
-module.exports = { errorHandler };
+};

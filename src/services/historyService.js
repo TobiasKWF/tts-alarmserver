@@ -1,86 +1,40 @@
 'use strict';
 
 /**
- * @file services/historyService.js
- * @description In-Memory Alarmhistorie mit konfigurierbarer Größe.
- * Speichert die letzten N Alarmierungen mit Metadaten.
- * Wird von WebSocket und Stats-Route genutzt.
+ * History-Service – speichert die letzten N Alarmierungen im Speicher.
+ * Wird für das Web-Dashboard verwendet.
  */
 
-const logger = require('../utils/logger').child({ service: 'HistoryService' });
 const config = require('../config');
 
-/** @type {Array<object>} */
-let history = [];
-
-/** @type {{ total: number, success: number, failed: number }} */
-let stats = { total: 0, success: 0, failed: 0 };
+const entries = [];
 
 /**
- * Fügt einen abgeschlossenen Alarm zur Historie hinzu.
+ * Fügt einen Alarm-Eintrag hinzu.
  * @param {object} entry
- * @param {string} entry.id
- * @param {string} entry.text
- * @param {string} entry.rawText
- * @param {string} entry.voice
- * @param {string} entry.source
- * @param {number} entry.priority
- * @param {string} entry.receivedAt
- * @param {string} entry.finishedAt
- * @param {number} entry.durationMs
- * @param {boolean} entry.success
- * @param {string} [entry.error]
  */
 function add(entry) {
-  const maxEntries = config.history.maxEntries;
-
-  history.unshift(entry); // Neueste zuerst
-
-  if (history.length > maxEntries) {
-    history = history.slice(0, maxEntries);
+  entries.unshift({ ...entry, ts: new Date().toISOString() });
+  if (entries.length > config.history.maxEntries) {
+    entries.length = config.history.maxEntries;
   }
-
-  stats.total++;
-  if (entry.success) {
-    stats.success++;
-  } else {
-    stats.failed++;
-  }
-
-  logger.debug('Alarm zur Historie hinzugefügt', {
-    alarmId: entry.id,
-    success: entry.success,
-    historySize: history.length,
-  });
 }
 
 /**
- * Gibt alle Historieneinträge zurück (neueste zuerst).
- * @returns {Array<object>}
+ * Gibt alle gespeicherten Einträge zurück.
+ * @returns {object[]}
  */
 function getAll() {
-  return history;
+  return entries.slice();
 }
 
 /**
- * Gibt aggregierte Statistiken zurück.
- * @returns {{ total: number, success: number, failed: number, successRate: number }}
+ * Gibt die letzten N Einträge zurück.
+ * @param {number} n
+ * @returns {object[]}
  */
-function getStats() {
-  return {
-    ...stats,
-    successRate: stats.total > 0
-      ? Math.round((stats.success / stats.total) * 100)
-      : 100,
-  };
+function getLast(n) {
+  return entries.slice(0, n);
 }
 
-/**
- * Löscht die gesamte Historie (z.B. für Tests).
- */
-function clear() {
-  history = [];
-  stats = { total: 0, success: 0, failed: 0 };
-}
-
-module.exports = { add, getAll, getStats, clear };
+module.exports = { add, getAll, getLast };

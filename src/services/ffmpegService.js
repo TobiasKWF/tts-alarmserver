@@ -1,268 +1,121 @@
 'use strict';
 
 /**
- * @file services/ffmpegService.js
- * @description FFmpeg-Service für RTP-Audio-Streaming.
+ * FFmpeg-Service.
  *
- * Streamt WAV-Audiodateien per RTP an eine Multicast- oder Unicast-Adresse.
- * Unterstützt optionales Voranstellen einer Gong-Datei (concat filter),
- * Multicast-Interface-Bindung, Stream-Timeout und Lautstärkeregelung.
- *
- * FFmpeg-Aufruf (ohne Gong):
- *   ffmpeg -y -i <audioFile>
- *          -af "volume=<vol>"
- *          -acodec <codec> -b:a <bitrate> -ar <sampleRate>
- *          -f rtp "rtp://<host>:<port>?ttl=<ttl>[&localaddr=<interface>]"
- *
- * FFmpeg-Aufruf (mit Gong, concat filter):
- *   ffmpeg -y -i <gongFile> -i <audioFile>
- *          -filter_complex "[0:a]volume=<vol>[g];[1:a]volume=<vol>[a];[g][a]concat=n=2:v=0:a=1[out]"
- *          -map "[out]" -acodec <codec> ...
- *
- * Events (via EventBus):
- *   stream.started  { alarmId, rtpUrl }
- *   stream.finished { alarmId, rtpUrl, durationMs }
- *   stream.error    { alarmId, rtpUrl, error }
+ * Aufgaben:
+ *   1. WAV-Dateien zusammenführen (concat)
+ *   2. WAV → RTP-kompatibles Format konvertieren (PCM µ-law / G.711)
  */
 
 const { spawn } = require('child_process');
-const config    = require('../config');
-const logger    = require('../utils/logger').child({ service: 'FFmpegService' });
-const eventBus  = require('../events/eventBus');
-const { AppError } = require('../errors');
-
-/** @type {FFmpegService|null} */
-let instance = null;
-
-class FFmpegService {
-  constructor() {
-    this._binary = config.ffmpeg.binary;
-  }
-
-  /**
-   * Gibt die Singleton-Instanz zurück.
-   * @returns {FFmpegService}
-   */
-  static getInstance() {
-    if (!instance) instance = new FFmpegService();
-    return instance;
-  }
-
-  /**
-   * Streamt eine Audio-Datei (mit optionalem Gong) per RTP.
-   *
-   * @param {object}      opts
-   * @param {string}      opts.audioFile    - Absoluter Pfad zur WAV-Datei
-   * @param {string|null} [opts.gongFile]   - Absoluter Pfad zur Gong-WAV oder null
-   * @param {string}      [opts.rtpHost]    - RTP-Zieladresse (Standard aus config)
-   * @param {number}      [opts.rtpPort]    - RTP-Zielport (Standard aus config)
-   * @param {string}      [opts.codec]      - FFmpeg-Audio-Codec (Standard aus config)
-   * @param {string}      [opts.bitrate]    - Audio-Bitrate (Standard aus config)
-   * @param {number}      [opts.volume]     - Lautstärke 0–100 (Standard aus config)
-   * @param {string}      [opts.alarmId]    - Alarm-ID für Events und Logging
-   * @returns {Promise<void>}
-   * @throws {AppError} Bei FFmpeg-Fehler oder Timeout
-   */
-  async streamToRtp({
-    audioFile,
-    gongFile    = null,
-    rtpHost     = config.rtp.host,
-    rtpPort     = config.rtp.port,
-    codec       = config.rtp.codec,
-    bitrate     = config.rtp.bitrate,
-    volume      = config.piper.volume,
-    alarmId     = 'unknown',
-  }) {
-    const rtpUrl = _buildRtpUrl({ rtpHost, rtpPort });
-
-    const args = _buildFfmpegArgs({
-      audioFile,
-      gongFile,
-      rtpUrl,
-      codec,
-      bitrate,
-      sampleRate: config.rtp.sampleRate,
-      volume,
-    });
-
-    logger.info('RTP-Stream gestartet', { alarmId, rtpUrl, codec, bitrate, hasGong: !!gongFile });
-    eventBus.emit('stream.started', { alarmId, rtpUrl });
-
-    const startMs = Date.now();
-
-    try {
-      await this._runFfmpegWithTimeout(args, rtpUrl, alarmId);
-    } catch (err) {
-      eventBus.emit('stream.error', { alarmId, rtpUrl, error: err.message });
-      throw err;
-    }
-
-    const durationMs = Date.now() - startMs;
-    logger.info('RTP-Stream abgeschlossen', { alarmId, rtpUrl, durationMs });
-    eventBus.emit('stream.finished', { alarmId, rtpUrl, durationMs });
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Führt FFmpeg mit Stream-Timeout aus.
-   * Delegiert ausschließlich an _spawnFfmpeg(), welches { promise, kill } liefert.
-   *
-   * @param {string[]} args
-   * @param {string}   rtpUrl
-   * @param {string}   alarmId
-   * @returns {Promise<void>}
-   */
-  async _runFfmpegWithTimeout(args, rtpUrl, alarmId) {
-    const timeoutMs  = config.rtp.timeoutSec * 1_000;
-    const procHandle = this._spawnFfmpeg(args, rtpUrl, alarmId);
-
-    return new Promise((resolve, reject) => {
-      const timeoutRef = setTimeout(() => {
-        procHandle.kill();
-        reject(new AppError(
-          `FFmpeg Stream-Timeout nach ${config.rtp.timeoutSec}s`,
-          { code: 'FFMPEG_TIMEOUT', statusCode: 500 }
-        ));
-      }, timeoutMs);
-
-      procHandle.promise
-        .then(() => {
-          clearTimeout(timeoutRef);
-          resolve();
-        })
-        .catch((err) => {
-          clearTimeout(timeoutRef);
-          reject(err);
-        });
-    });
-  }
-
-  /**
-   * Spawnt FFmpeg und gibt ein Objekt mit { promise, kill } zurück.
-   * @param {string[]} args
-   * @param {string}   rtpUrl
-   * @param {string}   alarmId
-   * @returns {{ promise: Promise<void>, kill: Function }}
-   */
-  _spawnFfmpeg(args, rtpUrl, alarmId) {
-    let proc = null;
-
-    const promise = new Promise((resolve, reject) => {
-      proc = spawn(this._binary, args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
-      const errorLines = [];
-      let   settled    = false;
-
-      const settle = (fn) => {
-        if (settled) return;
-        settled = true;
-        fn();
-      };
-
-      proc.stderr.on('data', (chunk) => {
-        // FFmpeg schreibt Progress-Info auf stderr – nur echte Fehler sammeln
-        const lines = chunk.toString().split('\n');
-        for (const line of lines) {
-          const l = line.toLowerCase();
-          if (l.includes('error') || l.includes('invalid') || l.includes('no such file')) {
-            errorLines.push(line.trim());
-            logger.warn('FFmpeg Fehler-Zeile', { line: line.trim(), rtpUrl, alarmId });
-          }
-        }
-      });
-
-      proc.on('error', (err) => {
-        settle(() => reject(new AppError(
-          `FFmpeg konnte nicht gestartet werden: ${err.message}`,
-          { code: 'FFMPEG_SPAWN_ERROR', cause: err, statusCode: 500 }
-        )));
-      });
-
-      proc.on('close', (code) => {
-        // code === null bei SIGKILL (Timeout-Kill) – kein Fehler falls Timeout
-        // bereits abgefangen. code === 0 = ok.
-        if (code !== 0 && code !== null) {
-          settle(() => reject(new AppError(
-            `FFmpeg beendet mit Exit-Code ${code}${errorLines.length ? ': ' + errorLines.slice(-3).join(' | ') : ''}`,
-            { code: 'FFMPEG_EXIT_ERROR', statusCode: 500 }
-          )));
-          return;
-        }
-        settle(() => resolve());
-      });
-    });
-
-    return {
-      promise,
-      kill: () => {
-        if (proc && !proc.killed) {
-          logger.warn('FFmpeg-Prozess wird durch Timeout beendet', { rtpUrl, alarmId });
-          proc.kill('SIGKILL');
-        }
-      },
-    };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Helfer
-// ---------------------------------------------------------------------------
+const fs = require('fs').promises;
+const path = require('path');
+const config = require('../config');
+const logger = require('../logging/logger');
+const { makeTempPath, removeTempFile, removeTempFiles } = require('../utils/tempFiles');
 
 /**
- * Baut die RTP-URL mit optionalem Interface-Parameter auf.
- * @param {{ rtpHost: string, rtpPort: number }} opts
- * @returns {string}
+ * Führt einen ffmpeg-Prozess aus.
+ * @param {string[]} args  - ffmpeg-Argumente
+ * @returns {Promise<void>}
  */
-function _buildRtpUrl({ rtpHost, rtpPort }) {
-  let url = `rtp://${rtpHost}:${rtpPort}?ttl=${config.rtp.ttl}&sdp_flags=disable_timestamps`;
-  if (config.rtp.interface) {
-    url += `&localaddr=${config.rtp.interface}`;
-  }
-  return url;
+async function runFfmpeg(args) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(config.ffmpeg.binary, args);
+    let stderr = '';
+    proc.stderr.on('data', d => { stderr += d.toString(); });
+
+    const timer = setTimeout(() => {
+      proc.kill('SIGKILL');
+      reject(new Error(`ffmpeg Timeout nach ${config.ffmpeg.timeoutMs}ms`));
+    }, config.ffmpeg.timeoutMs);
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`ffmpeg Exitcode ${code}: ${stderr.slice(-500)}`));
+      }
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      reject(new Error(`ffmpeg Prozessfehler: ${err.message}`));
+    });
+  });
 }
 
 /**
- * Baut die FFmpeg-Argumente für den RTP-Stream auf.
- * Mit Gong wird ein concat-Filter verwendet.
- *
- * @param {object} opts
- * @returns {string[]}
+ * Fügt mehrere WAV-Dateien zu einer zusammen.
+ * @param {string[]} inputPaths
+ * @param {string}   outputPath
+ * @returns {Promise<void>}
  */
-function _buildFfmpegArgs({ audioFile, gongFile, rtpUrl, codec, bitrate, sampleRate, volume }) {
-  // Lautstärke: 0–100 → 0.0–1.0 für FFmpeg volume-Filter
-  const vol = Math.min(100, Math.max(0, volume)) / 100;
+async function mergeWavFiles(inputPaths, outputPath) {
+  if (inputPaths.length === 1) {
+    // Einzelne Datei – einfach kopieren
+    const data = await fs.readFile(inputPaths[0]);
+    await fs.writeFile(outputPath, data);
+    return;
+  }
 
-  const outputArgs = [
-    '-acodec', codec,
-    '-b:a',    bitrate,
-    '-ar',     String(sampleRate),
-    '-f',      'rtp',
-    rtpUrl,
-  ];
+  // Concat-Liste als temporäre Datei
+  const listPath = makeTempPath('.txt');
+  const listContent = inputPaths.map(p => `file '${p}'`).join('\n');
+  await fs.writeFile(listPath, listContent, 'utf8');
 
-  if (gongFile) {
-    return [
+  try {
+    await runFfmpeg([
       '-y',
-      '-i', gongFile,
-      '-i', audioFile,
-      '-filter_complex',
-      `[0:a]volume=${vol}[g];[1:a]volume=${vol}[a];[g][a]concat=n=2:v=0:a=1[out]`,
-      '-map', '[out]',
-      ...outputArgs,
-    ];
+      '-f', 'concat',
+      '-safe', '0',
+      '-i', listPath,
+      '-c', 'copy',
+      outputPath,
+    ]);
+  } finally {
+    await removeTempFile(listPath);
   }
-
-  return [
-    '-y',
-    '-i',  audioFile,
-    '-af', `volume=${vol}`,
-    ...outputArgs,
-  ];
 }
 
-module.exports = { FFmpegService };
+/**
+ * Konvertiert eine WAV-Datei in das RTP-Streamformat.
+ * Standard: PCM µ-law (G.711), 8 kHz, mono.
+ * @param {string} inputPath
+ * @param {string} outputPath
+ * @returns {Promise<void>}
+ */
+async function wavToRtp(inputPath, outputPath) {
+  const { codec, sampleRate, channels } = config.rtp;
+  await runFfmpeg([
+    '-y',
+    '-i', inputPath,
+    '-ar', String(sampleRate),
+    '-ac', String(channels),
+    '-acodec', codec,
+    '-f', 'rtp',
+    outputPath,
+  ]);
+}
+
+/**
+ * Kompletter Pipeline-Schritt: WAV-Liste → einzelne RTP-Datei.
+ * @param {string[]} wavPaths   - Input-WAV-Dateien
+ * @returns {Promise<string>}   - Pfad zur fertigen RTP-Datei
+ */
+async function processToRtp(wavPaths) {
+  const mergedPath = makeTempPath('_merged.wav');
+  const rtpPath = makeTempPath('.rtp');
+
+  try {
+    await mergeWavFiles(wavPaths, mergedPath);
+    await wavToRtp(mergedPath, rtpPath);
+    return rtpPath;
+  } finally {
+    await removeTempFile(mergedPath);
+  }
+}
+
+module.exports = { runFfmpeg, mergeWavFiles, wavToRtp, processToRtp };
