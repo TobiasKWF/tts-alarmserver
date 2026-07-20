@@ -19,6 +19,7 @@ const config = {
    maxChunkLength: parseInt(process.env.PIPER_MAX_CHUNK || '500', 10),
    timeoutMs:      parseInt(process.env.PIPER_TIMEOUT_MS || '30000', 10),
    lengthScale:    parseFloat(process.env.PIPER_LENGTH_SCALE || '1.0'),
+   outputSampleRate: parseInt(process.env.PIPER_OUTPUT_SAMPLE_RATE || '16000', 10),
   },
 
   ffmpeg: {
