@@ -2,64 +2,91 @@
 
 /**
  * @file tts/diveraAdapter.js
- * @description Divera-Adapter: Wandelt den unveränderten Node-RED msg.payload
- * (Divera 24/7 Webhook-JSON) in einen bereinigten, sprechbaren TTS-Text um.
+ * @description Divera-Adapter: Wandelt Divera 24/7 Webhook-JSON in TTS-Text um.
  *
- * Verarbeitungs-Pipeline:
- *   1. Felder title, text, address aus dem Payload extrahieren
- *   2. address auf Einsatzortzusatz prüfen (alarmCleaner.extractOrtZusatz)
- *   3. Kombinierten Rohtext an alarmCleaner.buildSpeechText übergeben
- *   4. Ergebnis an speechEnhancer übergeben (Alarm-Codes, Zahlen, Abkürzungen)
- *
- * Unterstütztes Payload-Format (Node-RED / Divera 24/7 Webhook):
- * {
- *   title:   "B2 Wohnungsbrand",          // Einsatzstichwort
- *   text:    "Rauch aus dem Dachgeschoss", // Einsatzbeschreibung
- *   address: "Musterstraße 12, 38533 Vordorf OG 2" // Einsatzadresse
- * }
+ * Pipeline:
+ *   1. title  – Alarmstichwort (z.B. "H V U-1")
+ *   2. text   – Freitextbeschreibung (z.B. "V U mit VP auslaufende Betriebsflüssigkeiten")
+ *              Metadaten-Zeilen (Datum, Zeit, Einsatznummer …) werden herausgefiltert.
+ *   3. address – Einsatzort
+ *   4. Einsatzortzusatz aus text-Block wenn vorhanden
  */
 
 const { buildSpeechText } = require('./alarmCleaner');
-const { enhanceSpeech } = require('./speechEnhancer');
+const { enhanceSpeech }   = require('./speechEnhancer');
 const logger = require('../utils/logger').child({ service: 'DiveraAdapter' });
 
-/**
- * Wandelt einen Divera-Webhook-Payload in einen sprechbaren TTS-Text um.
- *
- * @param {object} payload - Der unveränderte Node-RED msg.payload
- * @param {string} [payload.title]   - Einsatzstichwort
- * @param {string} [payload.text]    - Einsatzbeschreibung
- * @param {string} [payload.address] - Einsatzadresse (kann Ortzusatz enthalten)
- * @returns {string} Bereinigter, sprechbarer TTS-Text
- */
+/** Zeilen im text-Feld die NICHT vorgelesen werden sollen. */
+const TEXT_DROP_PATTERNS = [
+  /^Datum[:\s]/i,
+  /^Zeit[:\s]/i,
+  /^Einsatznummer[:\s]/i,
+  /^Einsatz(?:nummer)?[:\s]/i,
+  /^Priorität[:\s]/i,
+  /^Sondersignal[:\s]/i,
+  /^Alarmierung[:\s]/i,
+  /^Status[:\s]/i,
+  /^Rückmeldung/i,
+  /^[-=*_]{3,}$/,
+  /^(?:WF|LF|HLF|TLF|DLK|RW|GW|KTW|RTW|NEF|ELW|MTF|TSF|MLF)\s+\d/i,
+  /^Florian\s/i,
+  /^Heros\s/i,
+];
+
+/** Zeilen die als Einsatzortzusatz behandelt werden. */
+const ORT_ZUSATZ_PATTERN = /^(?:Ortzusatz|Einsatzortzusatz|Zusatz|Objekt|Gebäude|Etage|Stockwerk)[:\s]/i;
+
 function adaptDiveraPayload(payload) {
   const title   = (payload.title   || '').trim();
-  const text    = (payload.text    || '').trim();
+  const rawText = (payload.text    || '').trim();
   const address = (payload.address || '').trim();
 
-  // Rohtext für alarmCleaner zusammenbauen:
-  // title als erste Zeile (Einsatzstichwort), text als Folgezeile,
-  // address als "Einsatzort:"-Sektion damit alarmCleaner sie korrekt zuordnet.
+  // text-Block zeilenweise aufteilen und filtern
+  const textLines    = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const descLines    = [];   // Freitext-Beschreibung (wird hinter Titel gestellt)
+  const zusatzLines  = [];   // Einsatzortzusatz-Zeilen
+
+  for (const line of textLines) {
+    if (TEXT_DROP_PATTERNS.some(p => p.test(line))) continue;
+
+    if (ORT_ZUSATZ_PATTERN.test(line)) {
+      // Wert nach dem Schlüssel extrahieren
+      const val = line.replace(ORT_ZUSATZ_PATTERN, '').trim();
+      if (val) zusatzLines.push(val);
+      continue;
+    }
+
+    descLines.push(line);
+  }
+
+  // Rohtext für alarmCleaner aufbauen:
+  //   Zeile 1: Titel + Beschreibung (kommagetrennt)
+  //   dann Einsatzort-Sektion
+  //   dann ggf. Einsatzortzusatz-Sektion
   const parts = [];
 
-  if (title) parts.push(title);
-  if (text)  parts.push(text);
+  const titleLine = [title, ...descLines].filter(Boolean).join(', ');
+  if (titleLine) parts.push(titleLine);
+
   if (address) {
     parts.push('');
     parts.push('Einsatzort:');
     parts.push(address);
   }
 
-  const rawText = parts.join('\n');
+  if (zusatzLines.length) {
+    parts.push('');
+    parts.push('Einsatzortzusatz:');
+    parts.push(...zusatzLines);
+  }
 
-  logger.debug('DiveraAdapter Rohtext', { rawText });
+  const combined = parts.join('\n');
+  logger.debug('DiveraAdapter Rohtext', { combined });
 
-  // Bereinigung + Sprachoptimierung
-  const cleanText  = buildSpeechText(rawText);
+  const cleanText  = buildSpeechText(combined);
   const spokenText = enhanceSpeech(cleanText);
 
   logger.debug('DiveraAdapter Ergebnis', { cleanText, spokenText });
-
   return spokenText;
 }
 
