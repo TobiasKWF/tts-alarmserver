@@ -14,30 +14,31 @@ const config = {
   },
 
   piper: {
-    binary: process.env.PIPER_BINARY || '/usr/local/bin/piper',
-    model: process.env.PIPER_MODEL || '/opt/piper/models/de_DE-thorsten-high.onnx',
-    maxChunkLength: parseInt(process.env.PIPER_MAX_CHUNK || '500', 10),
-    timeoutMs: parseInt(process.env.PIPER_TIMEOUT_MS || '30000', 10),
+    binary:         process.env.PIPER_BINARY    || '/usr/local/bin/piper',
+    model:          process.env.PIPER_MODEL     || '/opt/piper/models/de_DE-thorsten-medium.onnx',
+    maxChunkLength: parseInt(process.env.PIPER_MAX_CHUNK   || '500',   10),
+    timeoutMs:      parseInt(process.env.PIPER_TIMEOUT_MS  || '30000', 10),
   },
 
   ffmpeg: {
-    binary: process.env.FFMPEG_BINARY || 'ffmpeg',
+    binary:    process.env.FFMPEG_BINARY     || 'ffmpeg',
     timeoutMs: parseInt(process.env.FFMPEG_TIMEOUT_MS || '60000', 10),
   },
 
   rtp: {
-    host: process.env.RTP_HOST || '239.0.0.1',
-    port: parseInt(process.env.RTP_PORT || '5004', 10),
-    codec: process.env.RTP_CODEC || 'pcm_mulaw',
+    host:       process.env.RTP_HOST                          || '239.0.0.1',
+    port:       parseInt(process.env.RTP_PORT        || '5004', 10),
+    codec:      process.env.RTP_CODEC                         || 'pcm_mulaw',
     sampleRate: parseInt(process.env.RTP_SAMPLE_RATE || '8000', 10),
-    channels: parseInt(process.env.RTP_CHANNELS || '1', 10),
+    channels:   parseInt(process.env.RTP_CHANNELS   || '1',    10),
   },
 
   tmpDir: process.env.TMP_DIR || '/tmp/tts-alarm',
 
   queue: {
-    concurrency: parseInt(process.env.QUEUE_CONCURRENCY || '1', 10),
-    maxSize: parseInt(process.env.QUEUE_MAX_SIZE || '20', 10),
+    concurrency:      parseInt(process.env.QUEUE_CONCURRENCY  || '1',   10),
+    maxSize:          parseInt(process.env.QUEUE_MAX_SIZE      || '20',  10),
+    defaultPriority:  parseInt(process.env.QUEUE_DEFAULT_PRIO  || '5',   10),
   },
 
   history: {
