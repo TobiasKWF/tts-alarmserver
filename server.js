@@ -3,6 +3,8 @@
 /**
  * @file server.js
  * @description Einstiegspunkt fuer systemd / node server.js.
+ * Erstellt einen HTTP-Server (statt app.listen), damit WebSocket-Upgrades
+ * (initDashboardWS) korrekt funktionieren.
  */
 
 require('dotenv').config();
@@ -11,7 +13,6 @@ const http                = require('http');
 const app                 = require('./src/app');
 const config              = require('./src/config');
 const logger              = require('./src/logging/logger');
-const { initWebSocket }   = require('./src/services/websocketService');
 const { initDashboardWS } = require('./src/websocket/server');
 
 const PORT = config.server.port;
@@ -19,7 +20,7 @@ const HOST = config.server.host;
 
 const server = http.createServer(app);
 
-initWebSocket(server);
+// Dashboard-WebSocket initialisieren (v3.1)
 initDashboardWS(server);
 
 server.listen(PORT, HOST, () => {
