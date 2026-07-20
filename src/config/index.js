@@ -15,7 +15,7 @@ const config = {
 
   piper: {
     binary:         process.env.PIPER_BINARY    || '/usr/local/bin/piper',
-    model:          process.env.PIPER_MODEL     || '/opt/piper/models/de_DE-thorsten-medium.onnx',
+    model:          process.env.PIPER_MODEL     || '/opt/piper/models/de_DE-thorsten-low.onnx',
     maxChunkLength: parseInt(process.env.PIPER_MAX_CHUNK   || '500',   10),
     timeoutMs:      parseInt(process.env.PIPER_TIMEOUT_MS  || '30000', 10),
   },
@@ -36,9 +36,9 @@ const config = {
   tmpDir: process.env.TMP_DIR || '/tmp/tts-alarm',
 
   queue: {
-    concurrency:      parseInt(process.env.QUEUE_CONCURRENCY  || '1',   10),
-    maxSize:          parseInt(process.env.QUEUE_MAX_SIZE      || '20',  10),
-    defaultPriority:  parseInt(process.env.QUEUE_DEFAULT_PRIO  || '5',   10),
+    concurrency:     parseInt(process.env.QUEUE_CONCURRENCY  || '1',  10),
+    maxSize:         parseInt(process.env.QUEUE_MAX_SIZE      || '20', 10),
+    defaultPriority: parseInt(process.env.QUEUE_DEFAULT_PRIO  || '5',  10),
   },
 
   history: {
