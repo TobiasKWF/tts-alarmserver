@@ -23,9 +23,15 @@ const config = {
   },
 
   ffmpeg: {
-    binary:         process.env.FFMPEG_BINARY          || 'ffmpeg',
-    timeoutMs:      parseInt(process.env.FFMPEG_TIMEOUT_MS     || '60000', 10),
+    binary:         process.env.FFMPEG_BINARY             || 'ffmpeg',
+    timeoutMs:      parseInt(process.env.FFMPEG_TIMEOUT_MS || '60000', 10),
     pitchSemitones: parseFloat(process.env.FFMPEG_PITCH_SEMITONES || '0'),
+  },
+
+  alarm: {
+    // Pfad zur Gong-WAV-Datei. Leer = kein Gong.
+    // Relativer Pfad wird von alarmService gegen public/ aufgelöst.
+    gongFile: process.env.ALARM_GONG_FILE || '',
   },
 
   rtp: {

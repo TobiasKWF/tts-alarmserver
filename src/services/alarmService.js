@@ -2,10 +2,16 @@
 
 /**
  * Alarm-Service – Haupt-Orchestrierung.
- * Pipeline: rawText → clean → enhance → TTS(WAV) → merge WAV → RTP-Stream
+ * Pipeline: rawText → clean → enhance → TTS(WAV) → [Gong voranstellen] → merge WAV → RTP-Stream
+ *
+ * Gong-Verhalten (wie in der alten server.js):
+ *   - ALARM_GONG_FILE in .env setzen (z.B. gong.wav  oder absoluter Pfad)
+ *   - Relativer Pfad wird gegen <projectRoot>/public/ aufgelöst
+ *   - Existiert die Datei nicht, wird der Gong übersprungen (kein Fehler)
  */
 
 const path             = require('path');
+const fs               = require('fs');
 const { buildSpeechText }  = require('../tts/alarmCleaner');
 const { enhanceSpeech }    = require('../tts/speechEnhancer');
 const { textToWavFiles }   = require('./piperService');
@@ -18,6 +24,30 @@ const { logAlarm }         = require('../logging/alarmLog');
 const historyService       = require('./historyService');
 const DashboardState       = require('./dashboardState');
 const logger               = require('../logging/logger');
+const config               = require('../config');
+
+// Wurzel des Projekts (zwei Ebenen über src/services/)
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
+
+/**
+ * Gibt den absoluten Pfad zur Gong-Datei zurück,
+ * oder null wenn kein Gong konfiguriert / Datei fehlt.
+ */
+function resolveGongPath() {
+  const gongFile = config.alarm.gongFile;
+  if (!gongFile) return null;
+
+  const absPath = path.isAbsolute(gongFile)
+    ? gongFile
+    : path.join(PROJECT_ROOT, 'public', gongFile);
+
+  if (!fs.existsSync(absPath)) {
+    logger.warn(`Gong-Datei nicht gefunden, wird übersprungen: ${absPath}`);
+    return null;
+  }
+
+  return absPath;
+}
 
 // ---------------------------------------------------------------------------
 // processAlarm – TTS-Alarm
@@ -38,12 +68,22 @@ async function processAlarm(rawText, requestId) {
 
     spokenText = enhanceSpeech(cleanText);
 
+    // TTS → WAV-Chunks
     const wavChunks = await textToWavFiles(spokenText);
     tempFiles.push(...wavChunks);
 
+    // Gong-Datei als ersten Chunk einsetzen (wie alte server.js GONG_FILE-Logik)
+    const gongPath = resolveGongPath();
+    const allChunks = gongPath ? [gongPath, ...wavChunks] : wavChunks;
+
+    if (gongPath) {
+      logger.info(`[${requestId}] Gong vorangestellt: ${gongPath}`);
+    }
+
+    // Alle Chunks zu einer WAV zusammenführen
     const mergedWav = makeTempPath('_merged.wav');
     tempFiles.push(mergedWav);
-    await mergeWavFiles(wavChunks, mergedWav);
+    await mergeWavFiles(allChunks, mergedWav);
 
     const wordCount   = spokenText.split(/\s+/).length;
     const estimatedMs = Math.max(2000, wordCount * 400);
@@ -95,7 +135,7 @@ async function streamFanfare(file, requestId) {
   // Pfad auflösen: absolut oder relativ zu public/
   const audioPath = path.isAbsolute(file)
     ? file
-    : path.resolve(__dirname, '../../public', file);
+    : path.resolve(PROJECT_ROOT, 'public', file);
 
   logger.info(`[${requestId}] Fanfare: ${audioPath}`);
 
