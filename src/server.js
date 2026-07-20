@@ -3,87 +3,50 @@
 /**
  * @file server.js
  * @description HTTP-Server Einstiegspunkt.
+ * Startet den PiperDaemon beim Hochfahren damit das Modell bereits geladen
+ * ist wenn der erste Alarm eintrifft.
  */
 
-require('dotenv').config();
+const http         = require('http');
+const app          = require('./app');
+const config       = require('./config');
+const logger       = require('./logging/logger');
+const PiperDaemon  = require('./services/piperDaemon');
+const { ensureTmpDir } = require('./utils/tempFiles');
 
-const http               = require('http');
-const app                = require('./app');
-const config             = require('./config');
-const logger             = require('./utils/logger');
-const { initDashboardWS } = require('./websocket/server');
-const eventBus           = require('./events/eventBus');
-
-let server = null;
+const server = http.createServer(app);
 
 async function start() {
-  try {
-    config.validate();
+  // TMP-Verzeichnis sicherstellen
+  await ensureTmpDir();
 
-    logger.info('TTS-Alarmserver wird gestartet...', {
-      version:    process.env.npm_package_version || '1.0.0',
-      nodeEnv:    config.server.nodeEnv,
-      nodeVersion: process.version,
-    });
+  // Piper-Daemon vorladen (Modell wird einmal in RAM geladen)
+  logger.info('Lade Piper-Modell vor...');
+  const daemon = PiperDaemon.getInstance();
+  await daemon.start();
+  logger.info('Piper-Daemon bereit.');
 
-    server = http.createServer(app);
+  // HTTP-Server starten
+  server.listen(config.server.port, config.server.host, () => {
+    logger.info(`TTS-Alarmserver läuft auf http://${config.server.host}:${config.server.port}`);
+  });
 
-    // Dashboard WebSocket auf /ws/dashboard
-    initDashboardWS(server);
-
-    await new Promise((resolve, reject) => {
-      server.listen(config.server.port, config.server.host, (err) => {
-        if (err) return reject(err);
-        resolve();
-      });
-      server.once('error', reject);
-    });
-
-    const addr        = server.address();
-    const displayHost = config.server.host === '0.0.0.0' ? 'localhost' : config.server.host;
-
-    logger.info('TTS-Alarmserver läuft', {
-      host:        config.server.host,
-      port:        addr.port,
-      dashboard:   `http://${displayHost}:${addr.port}/dashboard`,
-      dashboardWS: `ws://${displayHost}:${addr.port}/ws/dashboard`,
-      pid:         process.pid,
-    });
-
-    eventBus.emit('server.started', { port: addr.port });
-
-  } catch (err) {
-    logger.error('Fehler beim Starten des Servers', { error: err.message, stack: err.stack });
-    process.exit(1);
-  }
+  // Graceful Shutdown
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT',  () => shutdown('SIGINT'));
 }
 
-async function shutdown(signal) {
-  logger.info(`Signal ${signal} empfangen – Graceful Shutdown...`);
-  eventBus.emit('server.stopping', { signal });
-
-  if (server) {
-    await new Promise((resolve) => {
-      server.close(() => { logger.info('HTTP-Server geschlossen.'); resolve(); });
-      setTimeout(() => { logger.warn('Forced shutdown nach Timeout.'); resolve(); }, 10_000);
-    });
-  }
-
-  logger.info('TTS-Alarmserver beendet.');
-  process.exit(0);
+function shutdown(signal) {
+  logger.info(`${signal} empfangen – fahre herunter...`);
+  PiperDaemon.getInstance().stop();
+  server.close(() => {
+    logger.info('HTTP-Server gestoppt.');
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), 10000);
 }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT',  () => shutdown('SIGINT'));
-
-process.on('uncaughtException', (err) => {
-  logger.error('Uncaught Exception', { error: err.message, stack: err.stack });
+start().catch(err => {
+  logger.error(`Startfehler: ${err.message}`);
   process.exit(1);
 });
-
-process.on('unhandledRejection', (reason) => {
-  logger.error('Unhandled Rejection', { reason: String(reason) });
-  process.exit(1);
-});
-
-start();
