@@ -3,10 +3,18 @@
 /**
  * Alarmtext-Bereinigung.
  *
+ * Unterstützte Eingangsformate:
+ *   1. Leitstellen-Hash-Format (eine Zeile, #-getrennt):
+ *      STICHWORT # Beschreibung # Adresse # HH:MM:SS # EinsatzNr [# Bemerkung]
+ *   2. Mehrzeiliges Label-Format:
+ *      Erste Zeile = Stichwort
+ *      Ort:\n  Adresse
+ *      Einsatzortzusatz:\n  Objekt
+ *
  * Behalten werden NUR:
- *   - Alarmtext (erste Zeile / Einsatzstichwort)
- *   - Einsatzort
- *   - Einsatzortzusatz / Objekt  → wird als "Einsatzobjekt:" ausgegeben
+ *   - Alarmtext (Stichwort [+ Beschreibung])
+ *   - Einsatzort (Adresse / Koordinaten)
+ *   - Einsatzobjekt (Zusatz)
  *
  * Alles andere (Datum, Zeit, Einheiten, Fahrzeuge, Status, STORNO …) wird verworfen.
  */
@@ -22,7 +30,7 @@ const SECTION_PATTERNS = [
 ];
 
 const LINE_PATTERNS = [
-  /^#{3,}\s*STORNO\s*/i,          // ### STORNO ### und Folgeformat → ignorieren
+  /^#{3,}\s*STORNO\s*/i,
   /^Datum[:\s]/i,
   /^Zeit[:\s]/i,
   /^Einsatznummer[:\s]/i,
@@ -41,20 +49,101 @@ const LINE_PATTERNS = [
   /^[-=*_]{3,}$/,
 ];
 
-const ORT_PATTERN             = /^(?:Ort|Einsatzort|Adresse)[:\s]/i;
-const ORT_ADDITIONAL_PATTERN  = /^(?:Ortzusatz|Einsatzortzusatz|Zusatz|Objekt|Gebäude|Etage|Stockwerk)[:\s]/i;
+const ORT_PATTERN            = /^(?:Ort|Einsatzort|Adresse)[:\s]/i;
+const ORT_ADDITIONAL_PATTERN = /^(?:Ortzusatz|Einsatzortzusatz|Zusatz|Objekt|Gebäude|Etage|Stockwerk)[:\s]/i;
 const ORT_INLINE_ZUSATZ_PATTERN =
   /\b(EG|UG|DG|(?:OG|UG|Stock)\s*\d*|Hinterhaus|Vorderhaus|Seitenflügel|Tor\s*\d+|Aufgang\s*\d+|Eingang\s*\w+|Halle\s*\d*)$/i;
 
-function extractAlarmInfo(rawText) {
-  const lines = rawText.split(/\r?\n/).map(l => l.trim());
+// Erkennt GPS-Koordinaten (dezimal oder DMS)
+const COORDS_PATTERN = /[-+]?\d{1,3}\.\d{3,}[,;\s]+[-+]?\d{1,3}\.\d{3,}/;
 
-  let alarmText              = '';
-  let locationLines          = [];
+/**
+ * Erkennt das Leitstellen-Hash-Format:
+ *   STICHWORT # Beschreibung # Adresse/Koordinaten # Zeit # Nr [# Bemerkung]
+ * Mindestens 3 #-getrennte Felder, wobei Feld[0] ein Alarmstichwort enthalten muss.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isHashFormat(text) {
+  const line = text.split(/\r?\n/)[0];
+  // Mind. 2 # auf einer Zeile und kein Ort:-Label im gesamten Text
+  return (line.match(/#/g) || []).length >= 2 && !ORT_PATTERN.test(text);
+}
+
+/**
+ * Wandelt das Hash-Format in das mehrzeilige Label-Format um.
+ *
+ * Felder: [0] Stichwort  [1] Beschreibung  [2] Adresse  [3] Zeit  [4] Nr  [5..] Bemerkung
+ *
+ * Koordinaten im Adressfeld (z.B. "52.1234, 10.5678") werden direkt als
+ * Einsatzort übernommen und später von speechEnhancer in lesbare Form
+ * gebracht.
+ *
+ * @param {string} text
+ * @returns {string}  Mehrzeiliger Text im Label-Format
+ */
+function normalizeHashFormat(text) {
+  // Nur die erste Zeile enthält das Hash-Format; Rest (falls vorhanden) ignorieren
+  const firstLine = text.split(/\r?\n/)[0];
+  const parts = firstLine.split('#').map(p => p.trim());
+
+  const stichwort   = parts[0] || '';
+  const beschreibung = parts[1] || '';
+  const adresse     = parts[2] || '';
+  // parts[3] = Zeit, parts[4] = EinsatzNr  → verwerfen
+  // parts[5..] = Bemerkung(en) – zusammenführen und als Einsatzobjekt anfügen
+  const bemerkung = parts.slice(5).filter(Boolean).join(', ');
+
+  // Adressfeld: Klammerninhalt (Objekt/Zusatz) herauslösen
+  // z.B. "WF-Wolfenbüttel, Im Kamp 3 <AH AWO Im Kamp>"  -> base + zusatz
+  //       "WF-Fümmelse, Untere Dorfstraße 41"            -> base only
+  let adresseBase  = adresse;
+  let adresseZusatz = bemerkung;
+
+  // Spitze Klammern <Objekt> extrahieren
+  const spitzMatch = adresse.match(/^(.+?)\s*<([^>]+)>\s*$/);
+  if (spitzMatch) {
+    adresseBase  = spitzMatch[1].trim();
+    adresseZusatz = [spitzMatch[2].trim(), bemerkung].filter(Boolean).join(', ');
+  }
+
+  // Runde Klammern (Zusatz) extrahieren wenn kein Spitzklammer-Match
+  if (!spitzMatch) {
+    const rundMatch = adresse.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+    if (rundMatch) {
+      adresseBase  = rundMatch[1].trim();
+      adresseZusatz = [rundMatch[2].trim(), bemerkung].filter(Boolean).join(', ');
+    }
+  }
+
+  // Alarmtext: Stichwort + Beschreibung auf einer Zeile
+  const alarmLine = beschreibung ? `${stichwort} ${beschreibung}` : stichwort;
+
+  let result = alarmLine + '\n';
+
+  if (adresseBase) {
+    result += '\nOrt:\n' + adresseBase;
+  }
+  if (adresseZusatz) {
+    result += '\n\nEinsatzortzusatz:\n' + adresseZusatz;
+  }
+
+  return result;
+}
+
+function extractAlarmInfo(rawText) {
+  // Hash-Format automatisch normalisieren
+  const text = isHashFormat(rawText) ? normalizeHashFormat(rawText) : rawText;
+
+  const lines = text.split(/\r?\n/).map(l => l.trim());
+
+  let alarmText               = '';
+  let locationLines           = [];
   let locationAdditionalLines = [];
-  let inLocation             = false;
-  let inLocationAdditional   = false;
-  let inRemovedSection       = false;
+  let inLocation              = false;
+  let inLocationAdditional    = false;
+  let inRemovedSection        = false;
 
   for (const line of lines) {
     if (!line) {
@@ -62,15 +151,13 @@ function extractAlarmInfo(rawText) {
       continue;
     }
 
-    // Beginn einer zu entfernenden Sektion
     if (SECTION_PATTERNS.some(p => p.test(line))) {
-      inRemovedSection       = true;
-      inLocation             = false;
-      inLocationAdditional   = false;
+      inRemovedSection     = true;
+      inLocation           = false;
+      inLocationAdditional = false;
       continue;
     }
 
-    // Innerhalb entfernter Sektion
     if (inRemovedSection) {
       if (ORT_PATTERN.test(line)) {
         inRemovedSection = false; inLocation = true; inLocationAdditional = false;
@@ -80,7 +167,6 @@ function extractAlarmInfo(rawText) {
       continue;
     }
 
-    // Einsatzortzusatz-Sektion
     if (ORT_ADDITIONAL_PATTERN.test(line)) {
       inLocationAdditional = true;
       inLocation           = false;
@@ -89,14 +175,12 @@ function extractAlarmInfo(rawText) {
       continue;
     }
 
-    // Einsatzort-Sektion
     if (ORT_PATTERN.test(line)) {
       inLocation           = true;
       inLocationAdditional = false;
       continue;
     }
 
-    // Gefilterte Zeilen (inkl. STORNO)
     if (LINE_PATTERNS.some(p => p.test(line))) {
       inLocation = false;
       continue;
@@ -112,9 +196,9 @@ function extractAlarmInfo(rawText) {
   }
 
   return {
-    alarmText:           alarmText.trim(),
-    location:            locationLines.filter(Boolean).join(', ').trim(),
-    locationAdditional:  locationAdditionalLines.filter(Boolean).join(', ').trim(),
+    alarmText:          alarmText.trim(),
+    location:           locationLines.filter(Boolean).join(', ').trim(),
+    locationAdditional: locationAdditionalLines.filter(Boolean).join(', ').trim(),
   };
 }
 
@@ -126,9 +210,6 @@ function extractOrtZusatz(addressLine) {
   return { base, zusatz };
 }
 
-/**
- * Entfernt doppelt genannte Straßenkennzeichnungen (z. B. zweimal L495)
- */
 function deduplicateRoadRefs(text) {
   const seen = new Set();
   return text.replace(/\b([ABLKSE]\d{1,4})\b/g, (match) => {
@@ -143,11 +224,19 @@ function buildSpeechText(rawText) {
   const locationClean = deduplicateRoadRefs(location);
 
   let speech = '';
-  if (alarmText) speech += alarmText + '. ';
-  if (locationClean) speech += 'Einsatzort: ' + locationClean + '.';
+  if (alarmText)      speech += alarmText + '. ';
+  if (locationClean)  speech += 'Einsatzort: ' + locationClean + '.';
   if (locationAdditional) speech += ' Einsatzobjekt: ' + locationAdditional + '.';
 
   return speech.trim();
 }
 
-module.exports = { extractAlarmInfo, extractOrtZusatz, deduplicateRoadRefs, buildSpeechText };
+module.exports = {
+  extractAlarmInfo,
+  extractOrtZusatz,
+  deduplicateRoadRefs,
+  buildSpeechText,
+  // Exportiert für Unit-Tests
+  isHashFormat,
+  normalizeHashFormat,
+};
