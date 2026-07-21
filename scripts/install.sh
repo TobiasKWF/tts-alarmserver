@@ -25,25 +25,21 @@
 
 set -euo pipefail
 
-# -----------------------------------------------------------------------------
-# Konfiguration – hier anpassen
-# -----------------------------------------------------------------------------
 REPO_URL="https://github.com/TobiasKWF/tts-alarmserver.git"
 INSTALL_DIR="/opt/tts-alarmserver"
-SERVICE_USER="root"                       # In Produktion eigenen User anlegen
-NODE_VERSION="22"                         # Node.js LTS Major-Version
-PIPER_VERSION="2023.11.14-2"             # Piper Release-Tag
-PIPER_ARCH="x86_64"                        # amd64 | arm64 | armv7l
+SERVICE_USER="root"
+NODE_VERSION="22"
+PIPER_VERSION="2023.11.14-2"
+PIPER_ARCH="x86_64"
 PIPER_BINARY="/usr/local/bin/piper"
 PIPER_DIR="/opt/piper"
 ESPEAK_DATA_PATH="/opt/piper"
 VOICE_NAME="de_DE-thorsten-high"
-VOICE_QUALITY="high"                      # low | medium | high
+VOICE_QUALITY="high"
 VOICE_URL_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/${VOICE_QUALITY}"
 APP_DIR="/opt/tts-alarmserver"
 VOICES_DIR="${APP_DIR}/voices"
 
-# Farben
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -52,9 +48,6 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# -----------------------------------------------------------------------------
-# Hilfsfunktionen
-# -----------------------------------------------------------------------------
 log()     { echo -e "${GREEN}[✓]${NC} $*"; }
 info()    { echo -e "${BLUE}[→]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
@@ -85,9 +78,6 @@ check_os() {
   log "OS: Debian $(cat /etc/debian_version)"
 }
 
-# -----------------------------------------------------------------------------
-# 1. System aktualisieren + Basis-Pakete
-# -----------------------------------------------------------------------------
 install_system_packages() {
   section "Schritt 1/10 – System-Pakete"
   info "apt update..."
@@ -111,9 +101,6 @@ install_system_packages() {
   log "ffmpeg: $(ffmpeg -version 2>&1 | head -1)"
 }
 
-# -----------------------------------------------------------------------------
-# 2. Node.js via NodeSource
-# -----------------------------------------------------------------------------
 install_nodejs() {
   section "Schritt 2/10 – Node.js ${NODE_VERSION} LTS"
 
@@ -143,9 +130,6 @@ https://deb.nodesource.com/node_${NODE_VERSION}.x nodistro main" \
   log "npm $(npm --version) installiert."
 }
 
-# -----------------------------------------------------------------------------
-# 3. Piper TTS Binary
-# -----------------------------------------------------------------------------
 install_piper() {
   section "Schritt 3/10 – Piper TTS Binary"
 
@@ -176,9 +160,6 @@ install_piper() {
   log "Piper installiert: $PIPER_BINARY"
 }
 
-# -----------------------------------------------------------------------------
-# 4. Piper Stimme herunterladen
-# -----------------------------------------------------------------------------
 install_voice() {
   section "Schritt 4/10 – Piper Stimme: ${VOICE_NAME} (${VOICE_QUALITY})"
 
@@ -207,7 +188,6 @@ install_voice() {
     "${VOICE_URL_BASE}/${VOICE_NAME}.onnx.json" \
     || error "Stimm-Konfiguration konnte nicht geladen werden."
 
-  # Funktionstest
   info "Funktionstest der Stimme ..."
   if ESPEAK_DATA_PATH="$ESPEAK_DATA_PATH" \
     echo "Alarmserver bereit" | "$PIPER_BINARY" \
@@ -223,9 +203,6 @@ install_voice() {
   fi
 }
 
-# -----------------------------------------------------------------------------
-# 5. Repository klonen oder aktualisieren
-# -----------------------------------------------------------------------------
 install_repository() {
   section "Schritt 5/10 – Repository"
 
@@ -243,9 +220,6 @@ install_repository() {
   fi
 }
 
-# -----------------------------------------------------------------------------
-# 6. npm install
-# -----------------------------------------------------------------------------
 install_npm_packages() {
   section "Schritt 6/10 – Node.js Abhängigkeiten"
   cd "$INSTALL_DIR"
@@ -254,9 +228,6 @@ install_npm_packages() {
   log "npm-Pakete installiert."
 }
 
-# -----------------------------------------------------------------------------
-# 7. Verzeichnisse anlegen
-# -----------------------------------------------------------------------------
 create_directories() {
   section "Schritt 7/10 – Verzeichnisse anlegen"
   local dirs=(
@@ -273,9 +244,6 @@ create_directories() {
   chown -R "${SERVICE_USER}:${SERVICE_USER}" "$INSTALL_DIR" 2>/dev/null || true
 }
 
-# -----------------------------------------------------------------------------
-# 8. .env erstellen
-# -----------------------------------------------------------------------------
 create_env_file() {
   section "Schritt 8/10 – Konfiguration (.env)"
 
@@ -294,7 +262,6 @@ create_env_file() {
   info "Erstelle .env aus .env.example ..."
   cp "${INSTALL_DIR}/.env.example" "$env_file"
 
-  # Pfade automatisch anpassen
   sed -i "s|PIPER_BINARY=.*|PIPER_BINARY=${PIPER_BINARY}|"              "$env_file"
   sed -i "s|PIPER_VOICES_DIR=.*|PIPER_VOICES_DIR=${INSTALL_DIR}/voices|" "$env_file"
   sed -i "s|AUDIO_GONG_DIR=.*|AUDIO_GONG_DIR=${INSTALL_DIR}/gong|"       "$env_file"
@@ -310,9 +277,6 @@ create_env_file() {
   warn "  API_KEY=<sicherer Schlüssel für Produktion>"
 }
 
-# -----------------------------------------------------------------------------
-# 9. systemd Service
-# -----------------------------------------------------------------------------
 install_systemd_service() {
   section "Schritt 9/10 – systemd Service"
 
@@ -336,7 +300,7 @@ Environment=NODE_ENV=production
 Environment=ESPEAK_DATA_PATH=${ESPEAK_DATA_PATH}
 Environment=LD_LIBRARY_PATH=${PIPER_DIR}
 
-ExecStart=${node_bin} ${INSTALL_DIR}/src/server.js
+ExecStart=${node_bin} ${INSTALL_DIR}/server.js
 ExecReload=/bin/kill -HUP \$MAINPID
 
 Restart=on-failure
@@ -351,7 +315,7 @@ SyslogIdentifier=tts-alarmserver
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=${INSTALL_DIR}/logs ${INSTALL_DIR}/tmp
+ReadWritePaths=${INSTALL_DIR}/logs ${INSTALL_DIR}/tmp ${INSTALL_DIR}/gong ${INSTALL_DIR}/voices
 
 LimitNOFILE=65535
 LimitNPROC=1024
@@ -365,9 +329,6 @@ SYSTEMD_EOF
   log "systemd Service registriert und aktiviert (Autostart beim Booten)."
 }
 
-# -----------------------------------------------------------------------------
-# 10. Update-Script
-# -----------------------------------------------------------------------------
 create_update_script() {
   section "Schritt 10/10 – Update-Script"
 
@@ -375,13 +336,9 @@ create_update_script() {
 
   cat > "$update_bin" <<'UPDATESCRIPT'
 #!/usr/bin/env bash
-# =============================================================
-#  TTS-Alarmserver Update-Script
-#  Verwendung: tts-alarmserver-update [--restart-only]
-# =============================================================
 set -euo pipefail
 
-INSTALL_DIR="/tts-alarmserver"
+INSTALL_DIR="/opt/tts-alarmserver"
 GREEN='\033[0;32m'; BLUE='\033[0;34m'; NC='\033[0m'
 
 log()  { echo -e "${GREEN}[\u2713]${NC} $*"; }
@@ -423,9 +380,6 @@ UPDATESCRIPT
   log "Verwendung: tts-alarmserver-update"
 }
 
-# -----------------------------------------------------------------------------
-# Zusammenfassung
-# -----------------------------------------------------------------------------
 print_summary() {
   local ip
   ip=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "127.0.0.1")
@@ -466,9 +420,6 @@ print_summary() {
   echo ""
 }
 
-# -----------------------------------------------------------------------------
-# Hauptprogramm
-# -----------------------------------------------------------------------------
 main() {
   clear
   echo -e "${BOLD}${CYAN}"
