@@ -6,10 +6,11 @@
 
 const express        = require('express');
 const path           = require('path');
-const { corsMiddleware }                          = require('./middleware/corsMiddleware');
-const { sanitize }                               = require('./middleware/sanitize');
+const { helmetMiddleware }                            = require('./middleware/helmetMiddleware');
+const { corsMiddleware }                              = require('./middleware/corsMiddleware');
+const { sanitize }                                   = require('./middleware/sanitize');
 const { globalLimiter, announceLimiter,
-        diveraLimiter }                          = require('./middleware/rateLimiter');
+        diveraLimiter }                              = require('./middleware/rateLimiter');
 const requestLogger  = require('./middleware/requestLogger');
 const errorHandler   = require('./middleware/errorHandler');
 const alarmRoutes    = require('./routes/alarm');
@@ -28,6 +29,11 @@ const app = express();
 // Vertrauenswürdige Proxies aktivieren damit express-rate-limit die echte
 // Client-IP aus X-Forwarded-For lesen kann (z.B. hinter nginx / Traefik).
 app.set('trust proxy', 1);
+
+// Helmet – setzt sichere HTTP-Response-Header (X-Content-Type-Options,
+// X-Frame-Options, Referrer-Policy, COOP u.v.m.).
+// Muss als erstes Middleware registriert sein.
+app.use(helmetMiddleware);
 
 // CORS – muss vor allen Routen registriert sein, damit Preflight-Requests
 // (OPTIONS) korrekt beantwortet werden.

@@ -15,6 +15,7 @@ const { notFoundHandler }  = require('./notFoundHandler');
 const { apiKeyAuth }       = require('./apiKeyAuth');
 const { globalLimiter, announceLimiter, diveraLimiter } = require('./rateLimiter');
 const { corsMiddleware }   = require('./corsMiddleware');
+const { helmetMiddleware } = require('./helmetMiddleware');
 const { sanitize }         = require('./sanitize');
 
 module.exports = {
@@ -27,5 +28,6 @@ module.exports = {
   announceLimiter,
   diveraLimiter,
   corsMiddleware,
+  helmetMiddleware,
   sanitize,
 };
