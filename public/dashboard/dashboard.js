@@ -114,12 +114,13 @@ modal.addEventListener('click', e => {
   if (e.target === modal) closeModal();
 });
 
-// Formular absenden
-submitBtn.addEventListener('click', async () => {
+// Formular absenden – Modal schliesst sofort, API-Call laeuft im Hintergrund
+submitBtn.addEventListener('click', () => {
   const title   = $('alarm-title').value.trim();
   const text    = $('alarm-text').value.trim();
   const address = $('alarm-address').value.trim();
 
+  // Pflichtfeld-Pruefung VOR dem Schliessen
   if (!title) {
     modalError.textContent = 'Bitte ein Alarmstichwort eingeben.';
     modalError.classList.remove('hidden');
@@ -132,36 +133,40 @@ submitBtn.addEventListener('click', async () => {
   if (text)    rawText += '\n\n' + text;
   if (address) rawText += '\n\nOrt:\n' + address;
 
-  submitBtn.disabled    = true;
-  submitBtn.textContent = 'Wird gesendet\u2026';
-  modalError.classList.add('hidden');
+  // Modal sofort schliessen
+  closeModal();
 
-  try {
-    const res = await fetch('/api/alarm', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ text: rawText }),
+  // Header-Button: Sende-Zustand anzeigen
+  clearTimeout(alarmTimer);
+  btnAlarm.disabled = true;
+  btnAlarm.className = 'btn-alarm state-sending';
+  btnAlarmLbl.textContent = 'Wird gesendet\u2026';
+
+  // API-Call im Hintergrund
+  fetch('/api/alarm', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ text: rawText }),
+  })
+    .then(res => res.json().then(json => ({ ok: res.ok, json })))
+    .then(({ ok, json }) => {
+      if (!ok) throw new Error(json.error || 'HTTP-Fehler');
+      // Erfolg
+      btnAlarm.className = 'btn-alarm state-ok';
+      btnAlarmLbl.textContent = '\u2713 Alarm gesendet';
+    })
+    .catch(err => {
+      // Fehler nur im Header-Button sichtbar
+      btnAlarm.className = 'btn-alarm state-err';
+      btnAlarmLbl.textContent = '\u2717 ' + err.message;
+    })
+    .finally(() => {
+      alarmTimer = setTimeout(() => {
+        btnAlarm.disabled = false;
+        btnAlarm.className = 'btn-alarm';
+        btnAlarmLbl.textContent = 'Alarmierung';
+      }, 3500);
     });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || 'HTTP ' + res.status);
-
-    // Erfolg: Button-Feedback im Header, Modal schliessen
-    closeModal();
-    clearTimeout(alarmTimer);
-    btnAlarm.disabled = true;
-    btnAlarm.className = 'btn-alarm state-ok';
-    btnAlarmLbl.textContent = '\u2713 Alarm gesendet';
-    alarmTimer = setTimeout(() => {
-      btnAlarm.disabled = false;
-      btnAlarm.className = 'btn-alarm';
-      btnAlarmLbl.textContent = 'Alarmierung';
-    }, 3000);
-  } catch (err) {
-    submitBtn.disabled    = false;
-    submitBtn.textContent = '\uD83D\uDEA8 Alarm ausl\u00f6sen';
-    modalError.textContent = 'Fehler: ' + err.message;
-    modalError.classList.remove('hidden');
-  }
 });
 
 // ---------------------------------------------------------------------------
@@ -247,8 +252,8 @@ function applyServer(s) {
     uptimeBase = Date.now() - s.uptime * 1000;
     tickUptime();
   }
-  if (s.memory)          $('stat-ram').textContent = (s.memory.heapUsedMB ?? s.memory) + ' MB';
-  if (s.wsClients != null) $('stat-ws').textContent = s.wsClients;
+  if (s.memory)            $('stat-ram').textContent = (s.memory.heapUsedMB ?? s.memory) + ' MB';
+  if (s.wsClients != null) $('stat-ws').textContent  = s.wsClients;
 }
 
 // Live-Uptime-Ticker
