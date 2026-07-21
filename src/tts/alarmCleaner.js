@@ -8,7 +8,7 @@
  *   - Einsatzort
  *   - Einsatzortzusatz / Objekt  → wird als "Einsatzobjekt:" ausgegeben
  *
- * Alles andere (Datum, Zeit, Einheiten, Fahrzeuge, Status …) wird verworfen.
+ * Alles andere (Datum, Zeit, Einheiten, Fahrzeuge, Status, STORNO …) wird verworfen.
  */
 
 const SECTION_PATTERNS = [
@@ -22,6 +22,7 @@ const SECTION_PATTERNS = [
 ];
 
 const LINE_PATTERNS = [
+  /^#{3,}\s*STORNO\s*/i,          // ### STORNO ### und Folgeformat → ignorieren
   /^Datum[:\s]/i,
   /^Zeit[:\s]/i,
   /^Einsatznummer[:\s]/i,
@@ -69,7 +70,7 @@ function extractAlarmInfo(rawText) {
       continue;
     }
 
-    // Innerhalb entfernter Sektion: nur bekannte Header lassen uns raus
+    // Innerhalb entfernter Sektion
     if (inRemovedSection) {
       if (ORT_PATTERN.test(line)) {
         inRemovedSection = false; inLocation = true; inLocationAdditional = false;
@@ -79,29 +80,25 @@ function extractAlarmInfo(rawText) {
       continue;
     }
 
-    // Einsatzortzusatz-Sektion beginnt
+    // Einsatzortzusatz-Sektion
     if (ORT_ADDITIONAL_PATTERN.test(line)) {
       inLocationAdditional = true;
       inLocation           = false;
-      // Wert nach dem Doppelpunkt direkt auf dieser Zeile mitnehmen
       const val = line.replace(ORT_ADDITIONAL_PATTERN, '').trim();
       if (val) locationAdditionalLines.push(val);
       continue;
     }
 
-    // Einsatzort-Sektion beginnt
+    // Einsatzort-Sektion
     if (ORT_PATTERN.test(line)) {
       inLocation           = true;
       inLocationAdditional = false;
       continue;
     }
 
-    // LINE_PATTERNS: gefilterte Zeile –
-    // WICHTIG: inLocationAdditional bleibt erhalten, nur inLocation wird zurückgesetzt.
-    // So bleiben Folgezeilen eines Einsatzortzusatz-Blocks erhalten.
+    // Gefilterte Zeilen (inkl. STORNO)
     if (LINE_PATTERNS.some(p => p.test(line))) {
       inLocation = false;
-      // inLocationAdditional bleibt absichtlich unverändert
       continue;
     }
 
@@ -130,13 +127,9 @@ function extractOrtZusatz(addressLine) {
 }
 
 /**
- * Entfernt doppelt genannte Straßenkennzeichnungen (z. B. zweimal L495)
- * aus einem zusammengesetzten Sprachtext.
- * @param {string} text
- * @returns {string}
+ * Entfernt doppelt genannte Straßenkennzeichnungen (z. B. zweimal L495)
  */
 function deduplicateRoadRefs(text) {
-  // Matcht Straßenpräfix + Nummer als eigenständiges Wort
   const seen = new Set();
   return text.replace(/\b([ABLKSE]\d{1,4})\b/g, (match) => {
     if (seen.has(match)) return '';
@@ -147,19 +140,12 @@ function deduplicateRoadRefs(text) {
 
 function buildSpeechText(rawText) {
   const { alarmText, location, locationAdditional } = extractAlarmInfo(rawText);
-
-  // Einsatzort vor Zusammenbau deduplizieren
   const locationClean = deduplicateRoadRefs(location);
 
   let speech = '';
   if (alarmText) speech += alarmText + '. ';
-  if (locationClean) {
-    speech += 'Einsatzort: ' + locationClean + '.';
-  }
-  // Einsatzobjekt explizit kennzeichnen (nicht als Nachsatz)
-  if (locationAdditional) {
-    speech += ' Einsatzobjekt: ' + locationAdditional + '.';
-  }
+  if (locationClean) speech += 'Einsatzort: ' + locationClean + '.';
+  if (locationAdditional) speech += ' Einsatzobjekt: ' + locationAdditional + '.';
 
   return speech.trim();
 }

@@ -4,16 +4,10 @@
  * @file tts/mappings/alarmMapping.js
  * @description Feuerwehr-Codes und Abkürzungen → ausgeschriebene deutsche Bezeichnung.
  *
- * Quellen: alarmMapping.js + config/normalization.json (zusammengeführt)
- *
  * Zwei Tabellen:
  *   ALARM_MAPPING  – Alarmstufen/Codes am Textanfang   (B2, TH, VU-1, H VU-1 …)
  *   INLINE_ABBR    – Abkürzungen im Freitext           (VP, LKW, BAB, OG …)
  */
-
-// ---------------------------------------------------------------------------
-// Alarm-Code-Mapping (Alarmstufen, Einsatzarten)
-// ---------------------------------------------------------------------------
 
 const ALARM_MAPPING = {
   // --- Menschengefährdungs-Suffix ---
@@ -46,13 +40,25 @@ const ALARM_MAPPING = {
   'THOEL2':'Technische Hilfe Ölspur mittel',
   'HZUG2Y':'Hilfeleistung Zugunfall mit Menschengefährdung',
 
-  // --- Hilfeleistung ---
+  // --- Hilfeleistung allgemein ---
   'H0':   'Hilfeleistung Lageerkundung',
   'H1':   'Hilfeleistung klein',
   'H2':   'Hilfeleistung mittel',
   'H2Y':  'Hilfeleistung mittel mit Menschengefährdung',
   'H3':   'Hilfeleistung groß',
   'H3Y':  'Hilfeleistung groß mit Menschengefährdung',
+
+  // --- Türöffnung / Hilflose Person ---
+  // H 1Y wird in der Leitstelle WF für "Notfalltüröffnung hilflose Person" verwendet
+  'H1Y':  'Türöffnung hilflose Person',
+
+  // --- Hilfeleistung Ölspur (H ÖL-Varianten aus Leitstelle WF) ---
+  'HOEL1': 'Hilfeleistung Ölspur klein',
+  'HOEL2': 'Hilfeleistung Ölspur mittel',
+  'HOEL3': 'Hilfeleistung Ölspur groß',
+
+  // --- Hilfeleistung Gas ---
+  'HGAS':  'Hilfeleistung Gasgeruch',
 
   // --- Verkehrsunfall ---
   'VU':    'Verkehrsunfall',
@@ -66,6 +72,12 @@ const ALARM_MAPPING = {
   'HVU2':  'Verkehrsunfall zwei',
   'HVU3':  'Verkehrsunfall drei',
   'HVU4':  'Verkehrsunfall vier',
+
+  // --- Unwetter ---
+  'UW':       'Unwetterlage',
+  'UWASSER':  'Unwetterlage Wasser im Keller',
+  'UWIND':    'Unwetterlage Sturm',
+  'UBLITZ':   'Unwetterlage Blitzschlag',
 
   // --- Rettungsdienst ---
   'RD':   'Rettungsdienst',
@@ -94,7 +106,6 @@ const ALARM_MAPPING = {
 
   // --- Tier / Sonstiges ---
   'TIN':      'Tier in Not',
-  'UW':       'Unwetterlage',
   'TUEROFF':  'Türöffnung',
   'PSNV':     'Psychosoziale Notfallversorgung',
   'SPERSUS':  'Drohneneinsatz Personensuche',
@@ -105,9 +116,7 @@ const ALARM_MAPPING = {
 // ---------------------------------------------------------------------------
 
 const INLINE_ABBR = [
-  // Kombinierte VU+VP Codes – müssen VOR den Einzelregeln stehen damit
-  // VP nicht isoliert als Nominativ ersetzt wird, sondern grammatikalisch
-  // korrekt als Dativ "mit verletzter Person" erscheint.
+  // Kombinierte VU+VP – VOR Einzelregel damit VP grammatikalisch korrekt
   [/\bVU1\s+VP\b/gi,  'Verkehrsunfall eins mit verletzter Person'],
   [/\bVU2\s+VP\b/gi,  'Verkehrsunfall zwei mit verletzter Person'],
   [/\bVU3\s+VP\b/gi,  'Verkehrsunfall drei mit verletzter Person'],
@@ -120,93 +129,94 @@ const INLINE_ABBR = [
   [/\bVU\s+VP\b/gi,   'Verkehrsunfall mit verletzter Person'],
   [/\bHVU\s+VP\b/gi,  'Verkehrsunfall mit verletzter Person'],
 
-  // Kombinierte VU+VPs (mehrere verletzte Personen)
+  // Kombinierte VU+VPs
   [/\bVU1\s+VPs\b/gi,  'Verkehrsunfall eins mit verletzten Personen'],
   [/\bVU2\s+VPs\b/gi,  'Verkehrsunfall zwei mit verletzten Personen'],
   [/\bVU3\s+VPs\b/gi,  'Verkehrsunfall drei mit verletzten Personen'],
   [/\bVU4\s+VPs\b/gi,  'Verkehrsunfall vier mit verletzten Personen'],
   [/\bVU\s+VPs\b/gi,   'Verkehrsunfall mit verletzten Personen'],
 
-  // Personen (allein im Freitext, Nominativ korrekt)
-  [/\bVP\b/g,              'verletzte Person'],
-  [/\bVPs\b/g,             'verletzte Personen'],
-  [/\bMP\b/g,              'mehrere Personen'],
+  // Personen
+  [/\bVP\b/g,   'verletzte Person'],
+  [/\bVPs\b/g,  'verletzte Personen'],
+  [/\bMP\b/g,   'mehrere Personen'],
+  [/\bHP\b/g,   'hilflose Person'],
 
   // Organisationen
-  [/\bDRK\b/g,             'Deutsches Rotes Kreuz'],
-  [/\bASB\b/g,             'Arbeiter-Samariter-Bund'],
-  [/\bJUH\b/g,             'Johanniter-Unfall-Hilfe'],
-  [/\bMHD\b/g,             'Malteser Hilfsdienst'],
-  [/\bDLRG\b/g,            'Deutsche Lebens-Rettungs-Gesellschaft'],
-  [/\bTHW\b/g,             'Technisches Hilfswerk'],
-  [/\bPOL\b/g,             'Polizei'],
-  [/\bFW\b/g,              'Feuerwehr'],
-  [/\bFF\b/g,              'Freiwillige Feuerwehr'],
-  [/\bBF\b/g,              'Berufsfeuerwehr'],
-  [/\bJF\b/g,              'Jugendfeuerwehr'],
+  [/\bDRK\b/g,  'Deutsches Rotes Kreuz'],
+  [/\bASB\b/g,  'Arbeiter-Samariter-Bund'],
+  [/\bJUH\b/g,  'Johanniter-Unfall-Hilfe'],
+  [/\bMHD\b/g,  'Malteser Hilfsdienst'],
+  [/\bDLRG\b/g, 'Deutsche Lebens-Rettungs-Gesellschaft'],
+  [/\bTHW\b/g,  'Technisches Hilfswerk'],
+  [/\bPOL\b/g,  'Polizei'],
+  [/\bFW\b/g,   'Feuerwehr'],
+  [/\bFF\b/g,   'Freiwillige Feuerwehr'],
+  [/\bBF\b/g,   'Berufsfeuerwehr'],
+  [/\bJF\b/g,   'Jugendfeuerwehr'],
 
   // Fahrzeuge
-  [/\bPKW\b/gi,            'Personenkraftwagen'],
-  [/\bLKW\b/gi,            'Lastkraftwagen'],
-  [/\bKFZ\b/gi,            'Kraftfahrzeug'],
-  [/\bDLK\b/g,             'Drehleiter'],
-  [/\bELW1\b/g,            'Einsatzleitwagen eins'],
-  [/\bELW2\b/g,            'Einsatzleitwagen zwei'],
-  [/\bELW\b/g,             'Einsatzleitwagen'],
-  [/\bHLF20\b/g,           'Hilfeleistungslöschfahrzeug zwanzig'],
-  [/\bHLF10\b/g,           'Hilfeleistungslöschfahrzeug zehn'],
-  [/\bHLF\b/g,             'Hilfeleistungslöschfahrzeug'],
-  [/\bLF20\b/g,            'Löschfahrzeug zwanzig'],
-  [/\bLF10\b/g,            'Löschfahrzeug zehn'],
-  [/\bLF\b/g,              'Löschfahrzeug'],
-  [/\bTLF3000\b/g,         'Tanklöschfahrzeug dreitausend'],
-  [/\bTLF\b/g,             'Tanklöschfahrzeug'],
-  [/\bRW\b/g,              'Rüstwagen'],
-  [/\bMTF\b/g,             'Mannschaftstransportfahrzeug'],
-  [/\bKdoW\b/gi,           'Kommandowagen'],
-  [/\bAB\b/g,              'Abrollbehälter'],
-  [/\bGW-L2\b/gi,          'Gerätewagen Logistik'],
-  [/\bGW-G\b/gi,           'Gerätewagen Gefahrgut'],
-  [/\bGW-A\b/gi,           'Gerätewagen Atemschutz'],
-  [/\bWBK\b/g,             'Wärmebildkamera'],
+  [/\bPKW\b/gi,     'Personenkraftwagen'],
+  [/\bLKW\b/gi,     'Lastkraftwagen'],
+  [/\bKFZ\b/gi,     'Kraftfahrzeug'],
+  [/\bDLK\b/g,      'Drehleiter'],
+  [/\bELW1\b/g,     'Einsatzleitwagen eins'],
+  [/\bELW2\b/g,     'Einsatzleitwagen zwei'],
+  [/\bELW\b/g,      'Einsatzleitwagen'],
+  [/\bHLF20\b/g,    'Hilfeleistungslöschfahrzeug zwanzig'],
+  [/\bHLF10\b/g,    'Hilfeleistungslöschfahrzeug zehn'],
+  [/\bHLF\b/g,      'Hilfeleistungslöschfahrzeug'],
+  [/\bLF20\b/g,     'Löschfahrzeug zwanzig'],
+  [/\bLF10\b/g,     'Löschfahrzeug zehn'],
+  [/\bLF\b/g,       'Löschfahrzeug'],
+  [/\bTLF3000\b/g,  'Tanklöschfahrzeug dreitausend'],
+  [/\bTLF\b/g,      'Tanklöschfahrzeug'],
+  [/\bRW\b/g,       'Rüstwagen'],
+  [/\bMTF\b/g,      'Mannschaftstransportfahrzeug'],
+  [/\bKdoW\b/gi,    'Kommandowagen'],
+  [/\bAB\b/g,       'Abrollbehälter'],
+  [/\bGW-L2\b/gi,   'Gerätewagen Logistik'],
+  [/\bGW-G\b/gi,    'Gerätewagen Gefahrgut'],
+  [/\bGW-A\b/gi,    'Gerätewagen Atemschutz'],
+  [/\bWBK\b/g,      'Wärmebildkamera'],
 
   // Rettungsdienst-Fahrzeuge
-  [/\bRTW\b/g,             'Rettungswagen'],
-  [/\bKTW\b/g,             'Krankentransportwagen'],
-  [/\bNEF\b/g,             'Notarzteinsatzfahrzeug'],
-  [/\bNAW\b/g,             'Notarztwagen'],
-  [/\bNKTW\b/g,            'Notfall-Krankentransportwagen'],
-  [/\bITW\b/g,             'Intensivtransportwagen'],
-  [/\bMZF\b/g,             'Mehrzweckfahrzeug'],
-  [/\bBHP\b/g,             'Behandlungsplatz'],
-  [/\bSEG\b/g,             'Schnelleinsatzgruppe'],
-  [/\bLNA\b/g,             'Leitender Notarzt'],
-  [/\bORGL\b/g,            'Organisatorischer Leiter Rettungsdienst'],
-  [/\b[ÖO]EL\b/g,         'Örtliche Einsatzleitung'],
-  [/\bOEGL\b/g,            'Örtliche Einsatzleitung'],
+  [/\bRTW\b/g,  'Rettungswagen'],
+  [/\bKTW\b/g,  'Krankentransportwagen'],
+  [/\bNEF\b/g,  'Notarzteinsatzfahrzeug'],
+  [/\bNAW\b/g,  'Notarztwagen'],
+  [/\bNKTW\b/g, 'Notfall-Krankentransportwagen'],
+  [/\bITW\b/g,  'Intensivtransportwagen'],
+  [/\bMZF\b/g,  'Mehrzweckfahrzeug'],
+  [/\bBHP\b/g,  'Behandlungsplatz'],
+  [/\bSEG\b/g,  'Schnelleinsatzgruppe'],
+  [/\bLNA\b/g,  'Leitender Notarzt'],
+  [/\bORGL\b/g, 'Organisatorischer Leiter Rettungsdienst'],
+  [/\b[ÖO]EL\b/g, 'Örtliche Einsatzleitung'],
+  [/\bOEGL\b/g, 'Örtliche Einsatzleitung'],
 
   // Straßen
-  [/\bBAB\b/g,             'Bundesautobahn'],
-  [/\bAS\b/g,              'Anschlussstelle'],
-  [/\bAK\b/g,              'Autobahnkreuz'],
-  [/\bAD\b/g,              'Autobahndreieck'],
-  [/\bFR\b/g,              'Fahrtrichtung'],
-  [/\bKM\b/g,              'Kilometer'],
+  [/\bBAB\b/g, 'Bundesautobahn'],
+  [/\bAS\b/g,  'Anschlussstelle'],
+  [/\bAK\b/g,  'Autobahnkreuz'],
+  [/\bAD\b/g,  'Autobahndreieck'],
+  [/\bFR\b/g,  'Fahrtrichtung'],
+  [/\bKM\b/g,  'Kilometer'],
 
   // Gebäudeteile
-  [/\bOG\s*(\d+)\b/g,      (_, n) => `Obergeschoss ${n}`],
-  [/\bOG\b/g,              'Obergeschoss'],
-  [/\bUG\b/g,              'Untergeschoss'],
-  [/\bEG\b/g,              'Erdgeschoss'],
-  [/\bDG\b/g,              'Dachgeschoss'],
-  [/\bKG\b/g,              'Kellergeschoss'],
-  [/\bGEB\b/gi,            'Gebäude'],
-  [/\bOBJ\b/gi,            'Objekt'],
+  [/\bOG\s*(\d+)\b/g, (_, n) => `Obergeschoss ${n}`],
+  [/\bOG\b/g,  'Obergeschoss'],
+  [/\bUG\b/g,  'Untergeschoss'],
+  [/\bEG\b/g,  'Erdgeschoss'],
+  [/\bDG\b/g,  'Dachgeschoss'],
+  [/\bKG\b/g,  'Kellergeschoss'],
+  [/\bGEB\b/gi,'Gebäude'],
+  [/\bOBJ\b/gi,'Objekt'],
 
   // Einsatzbegriffe
-  [/\bVU\b/g,              'Verkehrsunfall'],
-  [/\bVU-E\b/g,            'Verkehrsunfall mit eingeklemmter Person'],
-  [/\bTÜR\b/gi,            'Türöffnung'],
+  [/\bVU\b/g,    'Verkehrsunfall'],
+  [/\bVU-E\b/g,  'Verkehrsunfall mit eingeklemmter Person'],
+  [/\bTÜR\b/gi,  'Türöffnung'],
 ];
 
 // ---------------------------------------------------------------------------
@@ -218,18 +228,20 @@ function getAlarmLabel(code) {
 /**
  * Ersetzt Alarm-Codes und Inline-Abkürzungen im Text.
  * Unterstützt kompakte ('B2') und getrennte ('B 2', 'H VU-1') Schreibweise.
+ * Codes wie 'H ÖL-1' werden zu 'HOEL1' normalisiert bevor die Tabelle
+ * nachgeschlagen wird (Ö → OE, Bindestrich entfernen).
  */
 function replaceAlarmCodes(text) {
   let result = text;
 
-  // 1. Bindestrich-Varianten + mehrteilige Codes normalisieren:
-  //    'VU-1' -> 'VU1',  'H VU-1' -> 'HVU1',  'B WALD-2' -> 'BWALD2'
+  // 1. Bindestrich-Varianten + mehrteilige Codes normalisieren
   result = result.replace(
     /(^|[\s])([A-ZÄÖÜ]+)(?:\s+([A-ZÄÖÜ]+))?[-\s](\d+Y?)(?=[\s.,;!?]|$)/g,
     (match, pre, p1, p2, digits) => {
-      const c1 = (p1 + (p2 || '') + digits).toUpperCase();
+      const norm = s => s.replace(/Ä/g,'AE').replace(/Ö/g,'OE').replace(/Ü/g,'UE');
+      const c1 = (norm(p1) + norm(p2 || '') + digits).toUpperCase();
       if (ALARM_MAPPING[c1]) return pre + c1;
-      const c2 = (p1 + digits).toUpperCase();
+      const c2 = (norm(p1) + digits).toUpperCase();
       if (ALARM_MAPPING[c2]) return pre + c2;
       return match;
     }
@@ -239,17 +251,20 @@ function replaceAlarmCodes(text) {
   result = result.replace(
     /(^|[\s])([A-ZÄÖÜ]+)\s+(\d+Y?)(?=[\s.,;!?]|$)/g,
     (match, pre, letters, digits) => {
-      const compact = (letters + digits).toUpperCase();
+      const norm = s => s.replace(/Ä/g,'AE').replace(/Ö/g,'OE').replace(/Ü/g,'UE');
+      const compact = (norm(letters) + digits).toUpperCase();
       if (ALARM_MAPPING[compact]) return pre + compact;
       return match;
     }
   );
 
-  // 3. Mehrteilige Codes ohne Zahl: 'H VU' -> 'HVU',  'B BMA' -> 'BBMA'
+  // 3. Mehrteilige Codes ohne Zahl: 'H VU' -> 'HVU', 'B BMA' -> 'BBMA'
+  //    Umlaute normalisieren: 'H ÖL' -> 'HOEL'
   result = result.replace(
-    /(^|[\s])([A-Z])\s+([A-Z]{2,})(\d*Y?)(?=[\s.,;!?]|$)/g,
+    /(^|[\s])([A-ZÄÖÜ])\s+([A-ZÄÖÜ]{2,})(\d*Y?)(?=[\s.,;!?]|$)/g,
     (match, pre, letter, rest, digits) => {
-      const compact = (letter + rest + digits).toUpperCase();
+      const norm = s => s.replace(/Ä/g,'AE').replace(/Ö/g,'OE').replace(/Ü/g,'UE');
+      const compact = (norm(letter) + norm(rest) + digits).toUpperCase();
       if (ALARM_MAPPING[compact]) return pre + compact;
       return match;
     }
