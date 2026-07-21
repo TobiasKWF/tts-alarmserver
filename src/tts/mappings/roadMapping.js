@@ -1,22 +1,29 @@
 'use strict';
 
 /**
- * Mapping: Straßenkürzel → natürliche deutsche Aussprache.
+ * Mapping: Straßenkürzel + Leitstellen-Abkürzungen → natürliche deutsche Aussprache.
  *
- * Abgedeckt:
+ * Straßen:
  *   Autobahnen    (A2, A39, A391)
  *   Bundesstraßen (B6, B248)
  *   Landesstraßen (L615)
  *   Kreisstraßen  (K53)
- *   Straßenabkürzungen (Str., HsNr., …)
  *
- * Zahlen < 100      werden als Ganzzahl gesprochen  (A36  → Autobahn sechsunddreißig)
- * Landesstraßen     werden IMMER als Ganzzahl gesprochen
- *                   (L495 → Landesstraße vierhundertfünfundneunzig)
- * Alle anderen >= 100 werden ziffernweise gesprochen (A391 → Autobahn drei neun eins)
+ * Zahlen < 100 als Zahlwort, Landesstraßen immer als Zahlwort,
+ * alle anderen >= 100 ziffernweise.
  *
- * Hintergrund: Bei Durchsagen ist „vierhundertfünfundneunzig" deutlich
- * besser verständlich als „vier neun fünf".
+ * Leitstellen-Abkürzungen (werden in Beschreibung + Bemerkung aufgelöst):
+ *   VP  → verletzter Person
+ *   VU  → Verkehrsunfall
+ *   PKW → Personenkraftwagen
+ *   LKW → Lastkraftwagen
+ *   Pol.→ Polizei
+ *   Pat.→ Patient
+ *   RD  → Rettungsdienst
+ *   FW  → Feuerwehr
+ *   HP  → hilflose Person
+ *   AS  → Anschlussstelle
+ *   usw.
  */
 
 const { numberToWords } = require('../../utils/numbers');
@@ -35,49 +42,67 @@ const DIGIT_WORDS = {
   '5': 'fünf', '6': 'sechs', '7': 'sieben', '8': 'acht', '9': 'neun',
 };
 
-/** Spricht eine Zahl ziffernweise aus (A391 → "drei neun eins"). */
 function digitByDigit(numStr) {
   return numStr.split('').map(d => DIGIT_WORDS[d] || d).join(' ');
 }
 
 const ABBREVIATION_MAP = [
-  [/\bStr\.?\b/g,    'Straße'],
-  [/\bHsNr\.?\b/gi, 'Hausnummer'],
-  [/\bNr\.\s*(\d+)/g, (_, n) => 'Nummer ' + numberToWords(parseInt(n, 10))],
-  [/\bkm\b/g,       'Kilometer'],
-  [/\bca\.\b/gi,    'circa'],
-  [/\bggf\.\b/gi,   'gegebenenfalls'],
-  [/\bbzw\.\b/gi,   'beziehungsweise'],
-  [/\bEvtl\.\b/gi,  'eventuell'],
-  [/\bevtl\.\b/gi,  'eventuell'],
-  [/\bggü\.\b/gi,   'gegenüber'],
-  [/\bEcke\b/gi,    'Ecke'],
-  [/\bOT\b/g,       'Ortsteil'],
-  [/\bLkr\.?\b/gi,  'Landkreis'],
-  [/\bGem\.\b/gi,   'Gemeinde'],
-  [/\bGeb\.\b/gi,   'Gebäude'],
-  [/\bEG\b/g,       'Erdgeschoss'],
+  // -----------------------------------------------------------------------
+  // Leitstellen-Fachkürzel (vor allgemeinen Abkürzungen ausführen)
+  // -----------------------------------------------------------------------
+  [/\bVU\b/g,                         'Verkehrsunfall'],
+  [/\bVP\b/g,                         'verletzter Person'],
+  [/\bPKW\b/gi,                       'Personenkraftwagen'],
+  [/\bLKW\b/gi,                       'Lastkraftwagen'],
+  [/\bKrad\b/gi,                      'Kraftrad'],
+  [/\bHP\b/g,                         'hilflose Person'],
+  [/\bRD\b/g,                         'Rettungsdienst'],
+  [/\bFW\b/g,                         'Feuerwehr'],
+  [/\bPol\.?\b/gi,                    'Polizei'],
+  [/\bPat\.?\b/gi,                    'Patient'],
+  [/\bRTW\b/g,                        'Rettungswagen'],
+  [/\bNEF\b/g,                        'Notarzteinsatzfahrzeug'],
+  [/\bNA\b/g,                         'Notarzt'],
+  [/\bELW\b/g,                        'Einsatzleitwagen'],
+  [/\bMTF\b/g,                        'Mannschaftstransportfahrzeug'],
+  [/\bPA-Träger\b/gi,                'Pressluftatmer-Träger'],
+  [/\bPA\b/g,                         'Pressluftatmer'],
+  [/\bAirbags?\b/gi,                  'Airbags'],
+  [/\bE-Call\b/gi,                    'E-Call'],
+  [/\bAS\b/g,                         'Anschlussstelle'],
+  [/\bSprechverb\.?\b/gi,             'Sprechverbindung'],
+  [/\bBetriebsflüss?\.?\b/gi,        'Betriebsflüssigkeiten'],
+  // -----------------------------------------------------------------------
+  // Allgemeine Abkürzungen
+  // -----------------------------------------------------------------------
+  [/\bStr\.?\b/g,                     'Straße'],
+  [/\bHsNr\.?\b/gi,                   'Hausnummer'],
+  [/\bNr\.\s*(\d+)/g,                 (_, n) => 'Nummer ' + numberToWords(parseInt(n, 10))],
+  [/\bkm\b/g,                         'Kilometer'],
+  [/\bca\.\b/gi,                      'circa'],
+  [/\bggf\.\b/gi,                     'gegebenenfalls'],
+  [/\bbzw\.\b/gi,                     'beziehungsweise'],
+  [/\bevtl?\.\b/gi,                   'eventuell'],
+  [/\bggü\.\b/gi,                    'gegenüber'],
+  [/\bEcke\b/gi,                      'Ecke'],
+  [/\bOT\b/g,                         'Ortsteil'],
+  [/\bLkr\.?\b/gi,                    'Landkreis'],
+  [/\bGem\.\b/gi,                     'Gemeinde'],
+  [/\bGeb\.\b/gi,                     'Gebäude'],
+  [/\bEG\b/g,                         'Erdgeschoss'],
   [/\bOG(\d?)\b/g,  (_, n) => n ? 'Obergeschoss ' + numberToWords(parseInt(n, 10)) : 'Obergeschoss'],
-  [/\bUG\b/g,       'Untergeschoss'],
+  [/\bUG\b/g,                         'Untergeschoss'],
+  [/\bDG\b/g,                         'Dachgeschoss'],
 ];
 
-/**
- * Ersetzt Straßenkennzeichnungen im Text durch natürliche Sprache.
- * Landesstraßen (L) werden stets als Zahlwort gesprochen.
- * Alle anderen Typen >= 100 werden ziffernweise gesprochen.
- */
 function replaceRoadCodes(text) {
   return text.replace(/\b([ABLKSE])(\d{1,4})\b/g, (match, prefix, numStr) => {
     const roadType = ROAD_PREFIXES[prefix];
     if (!roadType) return match;
     const num = parseInt(numStr, 10);
-    let numSpoken;
-    if (prefix === 'L') {
-      // Landesstraßen immer als vollständiges Zahlwort für bessere Verständlichkeit
-      numSpoken = numberToWords(num);
-    } else {
-      numSpoken = num < 100 ? numberToWords(num) : digitByDigit(numStr);
-    }
+    const numSpoken = prefix === 'L' || num < 100
+      ? numberToWords(num)
+      : digitByDigit(numStr);
     return roadType + ' ' + numSpoken;
   });
 }
