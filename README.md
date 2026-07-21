@@ -588,4 +588,15 @@ tts-alarmserver-update
 
 ## Lizenz
 
-[MIT](LICENSE) © TobiasKWF
+TobiasKWF Community License
+
+Die Software darf von Feuerwehren, THW, Rettungsdiensten, Hilfsorganisationen und anderen gemeinnützigen Organisationen kostenlos genutzt werden.
+Änderungen für den Eigengebrauch sind erlaubt.
+Eine kommerzielle Nutzung, der Weiterverkauf oder die Einbindung in kommerzielle Produkte ist ohne schriftliche Genehmigung des Urhebers untersagt.
+Copyright © TobiasKWF.
+
+Copyright © TobiasKWF. All rights reserved.
+Permission is hereby granted to fire departments, technical relief organizations, emergency medical services, humanitarian aid organizations, and other non-profit organizations to use this software free of charge.
+Modifications to the software are permitted for the organization's own internal use.
+Commercial use, resale, sublicensing, or incorporation of this software into commercial products or services is prohibited without the prior written permission of the copyright holder.
+This software is provided "as is", without warranty of any kind. The copyright holder shall not be liable for any damages arising from the use of this software.
