@@ -6,8 +6,10 @@
 
 const express        = require('express');
 const path           = require('path');
-const { corsMiddleware } = require('./middleware/corsMiddleware');
-const { sanitize }   = require('./middleware/sanitize');
+const { corsMiddleware }                          = require('./middleware/corsMiddleware');
+const { sanitize }                               = require('./middleware/sanitize');
+const { globalLimiter, announceLimiter,
+        diveraLimiter }                          = require('./middleware/rateLimiter');
 const requestLogger  = require('./middleware/requestLogger');
 const errorHandler   = require('./middleware/errorHandler');
 const alarmRoutes    = require('./routes/alarm');
@@ -22,6 +24,10 @@ const dashboardRoute = require('./routes/dashboard');
 const logger         = require('./logging/logger');
 
 const app = express();
+
+// Vertrauenswürdige Proxies aktivieren damit express-rate-limit die echte
+// Client-IP aus X-Forwarded-For lesen kann (z.B. hinter nginx / Traefik).
+app.set('trust proxy', 1);
 
 // CORS – muss vor allen Routen registriert sein, damit Preflight-Requests
 // (OPTIONS) korrekt beantwortet werden.
@@ -41,6 +47,17 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Request-Logging
 app.use(requestLogger);
+
+// ---------------------------------------------------------------------------
+// Rate-Limiting
+// globalLimiter gilt für alle öffentlichen API- und Webhook-Endpunkte.
+// Ausgenommen: statische Assets, Dashboard und Health-/Stats-Endpunkte.
+// Zusätzlich werden /announce und /api/divera mit engeren Limits geschützt.
+// ---------------------------------------------------------------------------
+app.use('/api/alarm',   globalLimiter);
+app.use('/announce',    globalLimiter, announceLimiter);
+app.use('/api/divera',  globalLimiter, diveraLimiter);
+app.use('/api/voices',  globalLimiter);
 
 // Routen
 app.use('/api/alarm',    alarmRoutes);
