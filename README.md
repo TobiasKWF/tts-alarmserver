@@ -45,6 +45,9 @@ Ab **v3.1** steht ein Live-Dashboard unter `/dashboard` bereit, das per WebSocke
 - 📋 **Serialisierungsqueue** – Alarmierungen laufen nacheinander, kein Audio-Überlapp
 - 📝 **Strukturiertes Logging** – Winston + tägliche Rotation, Request-ID pro Alarm
 - 🛡️ **Fehlertoleranz** – Timeouts auf allen externen Prozessen, kein Server-Absturz bei Einzelfehlern
+- 🔒 **CORS-Schutz** – konfigurierbare Origin-Allowlist, WebSocket-kompatibel
+- ⚡ **Rate-Limiting** – Schutz vor Missbrauch auf allen öffentlichen API-Endpunkten (HTTP 429)
+- 🧹 **Eingabe-Sanitisierung** – Null-Byte-Injection und übermäßige JSON-Verschachtelung werden geblockt
 - 📊 **REST API** – `/api/alarm`, `/api/divera`, `/api/status`, `/api/health`, `/api/history`, `/api/stats`, `/api/voices`
 - 🎙️ **Direkte Durchsage** – `/announce` (TTS ohne Bereinigung) und `/announce/fanfare` (Audio-Datei direkt streamen)
 - 🔔 **Divera 24/7 Integration** – Direkter Webhook-Empfang inkl. Node-RED `msg.payload`
@@ -247,8 +250,16 @@ tts-alarmserver/
 │   ├── errors/
 │   │   └── index.js                 # Benutzerdefinierte Fehlerklassen
 │   └── middleware/
-│       ├── requestLogger.js
-│       └── errorHandler.js
+│       ├── index.js                 # Barrel-Export aller Middleware-Module
+│       ├── corsMiddleware.js        # CORS-Konfiguration (Origin-Allowlist, Preflight)
+│       ├── rateLimiter.js           # Rate-Limiting: global, /announce, /api/divera
+│       ├── sanitize.js              # Eingabe-Sanitisierung (Null-Bytes, Tiefe, Länge)
+│       ├── apiKeyAuth.js            # API-Key-Authentifizierung (POST /api/voices)
+│       ├── requestId.js             # Request-ID-Vergabe (UUID)
+│       ├── requestLogger.js         # HTTP-Request-Logging
+│       ├── errorHandler.js          # Globale Fehlerbehandlung
+│       ├── notFoundHandler.js       # 404-Handler
+│       └── sanitize.js              # Eingabe-Sanitisierung
 ├── public/
 │   ├── index.html                   # Redirect → /dashboard
 │   └── dashboard/                   # Live-Dashboard-Frontend (v3.1)
@@ -271,7 +282,7 @@ tts-alarmserver/
 | Komponente | Version | Hinweis |
 |---|---|---|
 | Node.js | ≥ 20 LTS | `node --version` |
-| npm-Pakete | siehe `package.json` | `express`, `dotenv`, `ws`, `winston`, `uuid`, `express-validator` |
+| npm-Pakete | siehe `package.json` | `express`, `dotenv`, `ws`, `winston`, `uuid`, `express-rate-limit`, `cors`, `express-validator` |
 | Piper | 2023.11.14-2 | [rhasspy/piper Releases](https://github.com/rhasspy/piper/releases) |
 | ffmpeg | ≥ 4.x | `apt install ffmpeg` |
 | espeak-ng | aktuell | Wird von Piper benötigt: `apt install espeak-ng espeak-ng-data` |
@@ -437,6 +448,12 @@ Alle Einstellungen in `.env`. Vollständige Referenz: [`.env.example`](.env.exam
 | `QUEUE_MAX_SIZE` | `20` | Max. Warteschlangengröße |
 | `HISTORY_MAX_ENTRIES` | `100` | Max. Einträge in der Alarmhistorie |
 | `LOG_LEVEL` | `info` | `error`\|`warn`\|`info`\|`debug` |
+| `CORS_ORIGIN` | `*` | Erlaubter Origin für CORS (Produktion: explizit setzen!) |
+| `CORS_ORIGINS` | – | Kommaseparierte Allowlist mehrerer Origins (überschreibt `CORS_ORIGIN`) |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Zeitfenster für Rate-Limiting in ms (1 Minute) |
+| `RATE_LIMIT_GLOBAL` | `200` | Max. Anfragen/Minute pro IP (global) |
+| `RATE_LIMIT_ANNOUNCE` | `30` | Max. Anfragen/Minute pro IP für `/announce` |
+| `RATE_LIMIT_DIVERA` | `60` | Max. Anfragen/Minute pro IP für `/api/divera` |
 
 ---
 
@@ -514,7 +531,7 @@ Content-Type: application/json
 | Code | Bedeutung |
 |---|---|
 | `400` | Kein oder leerer Alarmtext |
-| `429` | Queue voll (`QUEUE_MAX_SIZE` überschritten) |
+| `429` | Queue voll (`QUEUE_MAX_SIZE` überschritten) oder Rate-Limit überschritten |
 | `500` | Interner Fehler (Piper/ffmpeg) |
 
 **curl-Beispiel:**
@@ -969,6 +986,43 @@ Der TTS-Alarmserver ist für den Betrieb innerhalb eines **vertrauenswürdigen i
 
 Die REST-API besitzt standardmäßig **keine Authentifizierung**. Dies ist bewusst so umgesetzt, da der Server ausschließlich innerhalb eines geschützten LAN- oder VLAN-Netzes betrieben werden soll.
 
+## Integrierte Schutzmaßnahmen
+
+Ab v3.1 sind folgende Sicherheitsmechanismen aktiv:
+
+### CORS
+
+Alle API-Endpunkte senden korrekte CORS-Header. Der erlaubte Origin wird über `CORS_ORIGIN` / `CORS_ORIGINS` in der `.env` gesteuert. Ohne explizite Konfiguration ist CORS offen (`*`), was für interne Netzwerke ausreichend ist. In Produktionsumgebungen mit Reverse Proxy sollte `CORS_ORIGIN` auf den tatsächlichen Frontend-Origin gesetzt werden.
+
+```env
+# Einzelner Origin
+CORS_ORIGIN=https://dashboard.example.com
+
+# Mehrere Origins (kommasepariert)
+CORS_ORIGINS=https://app1.example.com,https://app2.example.com
+```
+
+### Rate-Limiting
+
+Öffentliche Write- und Webhook-Endpunkte sind durch `express-rate-limit` geschützt. Clients, die das Limit überschreiten, erhalten HTTP **429 Too Many Requests** mit einem strukturierten JSON-Fehler.
+
+| Endpunkt | Limit (Default) | Limiter |
+|---|---|---|
+| `/api/alarm` | 200 req/min pro IP | `globalLimiter` |
+| `/announce` | 30 req/min pro IP | `globalLimiter` + `announceLimiter` |
+| `/api/divera` | 60 req/min pro IP | `globalLimiter` + `diveraLimiter` |
+| `/api/voices` | 200 req/min pro IP | `globalLimiter` |
+| `/api/health`, `/api/status`, `/dashboard` | kein Limit | – |
+
+Alle Werte sind über `.env` anpassbar (siehe [Konfiguration](#konfiguration)).
+
+### Eingabe-Sanitisierung
+
+Jeder Request-Body wird nach dem JSON-Parsing automatisch bereinigt:
+- **Null-Byte-Injection** (`\x00`) wird aus allen Strings entfernt
+- **Übermäßige JSON-Verschachtelung** (> 10 Ebenen) wird auf `null` gesetzt
+- **Überlange String-Werte** (> 10.000 Zeichen) werden gekürzt
+
 ## Empfehlungen
 
 - Kein direkter Internetzugriff
@@ -976,6 +1030,7 @@ Die REST-API besitzt standardmäßig **keine Authentifizierung**. Dies ist bewus
 - Firewall-Regeln verwenden
 - Nur bekannte Systeme (Node-RED, Divera, Leitstelle usw.) auf den Server zugreifen lassen
 - Reverse Proxy nur bei Bedarf einsetzen
+- `CORS_ORIGIN` in Produktionsumgebungen explizit setzen
 
 Für öffentlich erreichbare Installationen sollte eine zusätzliche Authentifizierung (z. B. über einen Reverse Proxy) verwendet werden.
 
@@ -1079,6 +1134,23 @@ Prüfen:
 
 ---
 
+## HTTP 429 – Rate-Limit überschritten
+
+Wenn ein Client `429 Too Many Requests` erhält, wurde das konfigurierte Anfrage-Limit überschritten.
+
+```json
+{
+  "error": "RateLimitError",
+  "code": "RATE_LIMIT_EXCEEDED",
+  "message": "Zu viele Anfragen. Bitte warte kurz und versuche es erneut.",
+  "retryAfterMs": 60000
+}
+```
+
+Lösung: Limits in der `.env` anpassen (`RATE_LIMIT_GLOBAL`, `RATE_LIMIT_ANNOUNCE`, `RATE_LIMIT_DIVERA`) oder das Zeitfenster vergrößern (`RATE_LIMIT_WINDOW_MS`).
+
+---
+
 ## Voice-Modell fehlt
 
 Kontrollieren:
@@ -1163,6 +1235,8 @@ Dieses Projekt verwendet unter anderem folgende Open-Source-Komponenten:
 | Express | MIT |
 | ws | MIT |
 | Winston | MIT |
+| cors | MIT |
+| express-rate-limit | MIT |
 | Piper TTS | MIT |
 | ffmpeg | LGPL/GPL |
 | espeak-ng | GPL-3.0 |
