@@ -7,18 +7,20 @@
  *   1. Leitstellen-Hash-Format (eine Zeile, #-getrennt):
  *      STICHWORT # Beschreibung # Adresse # HH:MM:SS # EinsatzNr [# Bemerkung]
  *   2. Mehrzeiliges Label-Format:
- *      Erste Zeile = Stichwort
- *      Ort:\n  Adresse
- *      Einsatzortzusatz:\n  Objekt
+ *      Erste Zeile = Stichwort, Ort:\n Adresse, Einsatzortzusatz:\n Objekt
  *
- * Behalten werden NUR:
- *   - Alarmtext (nur Stichwort – Beschreibung wird verworfen, da das Stichwort
- *     bereits vom speechEnhancer vollständig ausgesprochen wird)
- *   - Einsatzort (Adresse / Koordinaten)
- *   - Einsatzobjekt (Zusatz + Bemerkung)
+ * Logik für Beschreibung (Feld [1]):
+ *   - Generische Stichwort-Codes (H0, H1, H2, H3, H VU-1 ohne eigene VP-Info
+ *     usw.) erhalten die Beschreibung angehängt, damit die Durchsage
+ *     vollständig ist.
+ *   - Alle anderen Codes (B x, BMA, VU, H1Y, HOEL …) sprechen sich durch
+ *     den speechEnhancer selbst vollständig aus → Beschreibung wird verworfen
+ *     um Dopplung zu vermeiden.
  *
- * Alles andere (Beschreibung, Datum, Zeit, Einheiten, Fahrzeuge, Status, STORNO …)
- * wird verworfen.
+ * Bemerkung (Feld [5+]):
+ *   - Immer vollständig übernehmen (Einsatzinfos bleiben erhalten).
+ *   - Wenn Bemerkung mit derselben Information wie die Beschreibung beginnt,
+ *     wird der redundante Präfix entfernt.
  */
 
 const SECTION_PATTERNS = [
@@ -57,9 +59,16 @@ const ORT_INLINE_ZUSATZ_PATTERN =
   /\b(EG|UG|DG|(?:OG|UG|Stock)\s*\d*|Hinterhaus|Vorderhaus|Seitenflügel|Tor\s*\d+|Aufgang\s*\d+|Eingang\s*\w+|Halle\s*\d*)$/i;
 
 /**
- * Erkennt das Leitstellen-Hash-Format:
- *   STICHWORT # Beschreibung # Adresse # Zeit # Nr [# Bemerkung]
- * Mindestens 2 # auf der ersten Zeile, kein Ort:-Label im Text.
+ * Codes deren eingebettetes Stichwort so generisch ist, dass die Beschreibung
+ * aus Feld [1] als Zusatzinfo mit in den Alarmtext übernommen wird.
+ * Alle anderen Codes sprechen sich durch den speechEnhancer selbst vollständig
+ * aus (z.B. B2, BMA, H1Y, HOEL1, VU1 …) – Beschreibung dort verwerfen.
+ */
+const GENERIC_CODES = /^(H\s*0|H\s*1|H\s*2|H\s*3|H\s*VU|VU)\b/i;
+
+/**
+ * Erkennt das Leitstellen-Hash-Format.
+ * Mind. 2 # auf der ersten Zeile, kein Ort:-Label im gesamten Text.
  */
 function isHashFormat(text) {
   const line = text.split(/\r?\n/)[0];
@@ -67,37 +76,70 @@ function isHashFormat(text) {
 }
 
 /**
+ * Entfernt redundante Präfixe aus der Bemerkung wenn diese mit derselben
+ * Information wie die Beschreibung beginnt.
+ * Beispiel:
+ *   beschreibung = "Wasser im Keller"
+ *   bemerkung    = "Wasser im Keller Schützenhaus"
+ *   → Ergebnis    = "Schützenhaus"
+ */
+function deduplicateBemerkung(beschreibung, bemerkung) {
+  if (!beschreibung || !bemerkung) return bemerkung;
+  const norm = s => s.toLowerCase().replace(/[\s,;]+/g, ' ').trim();
+  const bDesc = norm(beschreibung);
+  const bBem  = norm(bemerkung);
+  if (bBem.startsWith(bDesc)) {
+    const rest = bemerkung.slice(beschreibung.length).replace(/^[\s,;]+/, '').trim();
+    return rest || '';
+  }
+  return bemerkung;
+}
+
+/**
  * Wandelt das Hash-Format in das mehrzeilige Label-Format um.
  *
  * Felder:
- *   [0] Stichwort   → Alarmtext (allein, ohne Beschreibung)
- *   [1] Beschreibung → VERWORFEN (wäre Dopplung zum ausgesprochenen Stichwort)
- *   [2] Adresse     → Ort:
- *   [3] Zeit        → verworfen
- *   [4] EinsatzNr   → verworfen
- *   [5+] Bemerkung  → Einsatzobjekt:
+ *   [0] Stichwort    → Alarmtext
+ *   [1] Beschreibung → nur bei generischen Codes an Stichwort anhängen,
+ *                      sonst verworfen (Dopplung)
+ *   [2] Adresse      → Ort:
+ *   [3] Zeit         → verworfen
+ *   [4] EinsatzNr    → verworfen
+ *   [5+] Bemerkung   → Einsatzobjekt: (vollständig, Dopplung zu [1] entfernt)
  */
 function normalizeHashFormat(text) {
   const firstLine = text.split(/\r?\n/)[0];
   const parts = firstLine.split('#').map(p => p.trim());
 
-  const stichwort = parts[0] || '';
-  // parts[1] = Beschreibung – bewusst verworfen
-  const adresse   = parts[2] || '';
+  const stichwort    = parts[0] || '';
+  const beschreibung = parts[1] || '';
+  const adresse      = parts[2] || '';
   // parts[3] = Zeit, parts[4] = EinsatzNr – verworfen
-  const bemerkung = parts.slice(5).filter(Boolean).join(', ');
+  const bemerkungRaw = parts.slice(5).filter(Boolean).join(', ');
 
-  // Adressfeld: Klammerninhalt (Objekt/Zusatz) herauslösen
+  // Beschreibung nur bei generischen Codes an Stichwort hängen
+  const useDescription = GENERIC_CODES.test(stichwort) && beschreibung;
+  const alarmLine = useDescription
+    ? `${stichwort} ${beschreibung}`
+    : stichwort;
+
+  // Bemerkung: redundante Beschreibungs-Info entfernen
+  const bemerkung = deduplicateBemerkung(
+    useDescription ? '' : beschreibung, // bei generischen Codes schon im alarmLine
+    bemerkungRaw
+  );
+
+  // Adressfeld: Klammerninhalt herauslösen
   let adresseBase   = adresse;
   let adresseZusatz = bemerkung;
 
-  // Spitze Klammern <Objekt> extrahieren
+  // Spitze Klammern <Objekt>
   const spitzMatch = adresse.match(/^(.+?)\s*<([^>]+)>\s*$/);
   if (spitzMatch) {
     adresseBase   = spitzMatch[1].trim();
     adresseZusatz = [spitzMatch[2].trim(), bemerkung].filter(Boolean).join(', ');
   } else {
-    // Runde Klammern (Zusatz) extrahieren
+    // Runde Klammern (Zusatz)
     const rundMatch = adresse.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
     if (rundMatch) {
       adresseBase   = rundMatch[1].trim();
@@ -105,7 +147,7 @@ function normalizeHashFormat(text) {
     }
   }
 
-  let result = stichwort + '\n';
+  let result = alarmLine + '\n';
   if (adresseBase)   result += '\nOrt:\n' + adresseBase;
   if (adresseZusatz) result += '\n\nEinsatzortzusatz:\n' + adresseZusatz;
 
