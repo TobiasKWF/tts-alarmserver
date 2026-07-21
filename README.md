@@ -45,7 +45,8 @@ Ab **v3.1** steht ein Live-Dashboard unter `/dashboard` bereit, das per WebSocke
 - 📋 **Serialisierungsqueue** – Alarmierungen laufen nacheinander, kein Audio-Überlapp
 - 📝 **Strukturiertes Logging** – Winston + tägliche Rotation, Request-ID pro Alarm
 - 🛡️ **Fehlertoleranz** – Timeouts auf allen externen Prozessen, kein Server-Absturz bei Einzelfehlern
-- 📊 **REST API** – `/api/alarm`, `/api/divera`, `/api/status`, `/api/history`
+- 📊 **REST API** – `/api/alarm`, `/api/divera`, `/api/status`, `/api/health`, `/api/history`, `/api/stats`, `/api/voices`
+- 🎙️ **Direkte Durchsage** – `/announce` (TTS ohne Bereinigung) und `/announce/fanfare` (Audio-Datei direkt streamen)
 - 🔔 **Divera 24/7 Integration** – Direkter Webhook-Empfang inkl. Node-RED `msg.payload`
 - 🖥️ **Live-Dashboard** – WebSocket-basierte Echtzeit-Oberfläche unter `/dashboard` (v3.1)
 
@@ -374,9 +375,34 @@ Nach dem Start:
 
 ## REST API
 
+### Übersicht aller Endpunkte
+
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| `POST` | `/api/alarm` | Alarmtext empfangen → TTS + RTP mit Bereinigung |
+| `POST` | `/api/divera` | Divera 24/7 Webhook-Empfänger |
+| `POST` | `/announce` | Direkte Durchsage ohne Alarmtext-Bereinigung |
+| `POST` | `/announce/fanfare` | Audiodatei direkt per RTP streamen (kein TTS) |
+| `GET` | `/api/status` | Queue-Status und Server-Uptime |
+| `GET` | `/api/health` | Liveness-Probe |
+| `GET` | `/api/health/ready` | Readiness-Probe |
+| `GET` | `/api/history` | Letzte N Alarmierungen |
+| `GET` | `/api/stats` | Aggregierte Server-Statistiken |
+| `GET` | `/api/stats/history` | Alarmhistorie mit Paginierung |
+| `GET` | `/api/voices` | Installierte Piper-Stimmen auflisten |
+| `POST` | `/api/voices` | Standard-Stimme ändern (API-Key erforderlich) |
+
+---
+
 ### POST /api/alarm
 
-Alarmtext senden und Durchsage auslösen.
+Alarmtext senden und Durchsage mit vollständiger Bereinigungspipeline auslösen.
+
+**Body-Felder:**
+
+| Feld | Typ | Pflicht | Beschreibung |
+|---|---|---|---|
+| `text` | string | ✅ | Roher Alarmtext (auch als `alarmtext` oder plain-text body akzeptiert) |
 
 ```http
 POST /api/alarm
@@ -387,7 +413,7 @@ Content-Type: application/json
 }
 ```
 
-**Antwort:** `200 OK`
+**Antwort `200 OK`:**
 ```json
 {
   "requestId": "a3f9c1",
@@ -397,26 +423,36 @@ Content-Type: application/json
 }
 ```
 
----
+**Fehlerantworten:**
 
-### POST /announce
+| Code | Bedeutung |
+|---|---|
+| `400` | Kein oder leerer Alarmtext |
+| `429` | Queue voll (`QUEUE_MAX_SIZE` überschritten) |
+| `500` | Interner Fehler (Piper/ffmpeg) |
 
-Alternative Route – direkte Sprachausgabe ohne Alarmtext-Bereinigung.
-
-```http
-POST /announce
-Content-Type: application/json
-
-{ "text": "B2Y Musterstraße fünf", "priority": 1 }
+**curl-Beispiel:**
+```bash
+curl -s -X POST http://localhost:3000/api/alarm \
+  -H "Content-Type: application/json" \
+  -d '{"text":"B2 Verdächtiger Rauch\n\nOrt:\nMusterstraße 12"}'
 ```
-
-**Antwort:** `202 Accepted`
 
 ---
 
 ### POST /api/divera
 
-Divera 24/7 Webhook-Empfänger.
+Divera 24/7 Webhook-Empfänger. Der Payload wird über `diveraAdapter.js` zu einem Rohtext zusammengebaut und dann durch dieselbe Bereinigungspipeline wie `/api/alarm` geleitet.
+
+**Body-Felder:**
+
+| Feld | Typ | Pflicht | Beschreibung |
+|---|---|---|---|
+| `title` | string | ⚠️ | Alarmstichwort (mindestens `title` oder `text` erforderlich) |
+| `text` | string | ⚠️ | Ergänzender Alarmtext |
+| `address` | string | ❌ | Einsatzadresse |
+| `priority` | integer 1–10 | ❌ | Queue-Priorität (Standard: aus Config) |
+| `ucr_self_status_id` | integer | ❌ | Divera-Status-ID (wird ignoriert, aber validiert) |
 
 ```http
 POST /api/divera
@@ -430,32 +466,290 @@ Content-Type: application/json
 }
 ```
 
-**Antwort:** `202 Accepted`
+**Antwort `202 Accepted`:**
+```json
+{
+  "ok": true,
+  "alarmId": "550e8400-e29b-41d4-a716-446655440000",
+  "position": 0,
+  "message": "Divera-Alarm in Queue eingereiht"
+}
+```
+
+**Node-RED Beispiel** (`msg.payload` direkt weitergeben):
+```javascript
+// HTTP-Request-Node Konfiguration
+msg.url = "http://localhost:3000/api/divera";
+msg.method = "POST";
+// msg.payload enthält bereits { title, text, address }
+return msg;
+```
+
+---
+
+### POST /announce
+
+Direkte TTS-Durchsage **ohne** Alarmtext-Bereinigung. Der Text wird unverändert an Piper übergeben.
+
+**Body-Felder:**
+
+| Feld | Typ | Pflicht | Beschreibung |
+|---|---|---|---|
+| `text` | string | ✅ | Sprachtext (max. 2000 Zeichen) |
+| `priority` | integer 1–10 | ❌ | Queue-Priorität |
+
+```http
+POST /announce
+Content-Type: application/json
+
+{
+  "text": "Achtung, Achtung. Einsatz für alle Kräfte. Bitte sofort ausrücken.",
+  "priority": 1
+}
+```
+
+**Antwort `202 Accepted`:**
+```json
+{
+  "ok": true,
+  "alarmId": "550e8400-e29b-41d4-a716-446655440001",
+  "position": 0,
+  "message": "Durchsage in Queue eingereiht"
+}
+```
+
+**curl-Beispiel:**
+```bash
+curl -s -X POST http://localhost:3000/announce \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Testdurchsage läuft.", "priority": 5}'
+```
+
+---
+
+### POST /announce/fanfare
+
+Spielt eine Audio-Datei **direkt per RTP** ab – ohne TTS-Verarbeitung. Nützlich für Gongsignale, Sirenen oder vorgefertigte Audiodateien.
+
+**Body-Felder:**
+
+| Feld | Typ | Pflicht | Beschreibung |
+|---|---|---|---|
+| `file` | string | ✅ | Dateiname (max. 200 Zeichen, relativ zum konfigurierten Verzeichnis) |
+| `priority` | integer 1–10 | ❌ | Queue-Priorität |
+
+```http
+POST /announce/fanfare
+Content-Type: application/json
+
+{
+  "file": "gong.wav",
+  "priority": 1
+}
+```
+
+**Antwort `202 Accepted`:**
+```json
+{
+  "ok": true,
+  "alarmId": "550e8400-e29b-41d4-a716-446655440002",
+  "position": 0,
+  "message": "Fanfare \"gong.wav\" in Queue eingereiht"
+}
+```
 
 ---
 
 ### GET /api/status
 
+Gibt Queue-Status und Server-Uptime zurück.
+
+```http
+GET /api/status
+```
+
+**Antwort `200 OK`:**
 ```json
-{ "status": "ok", "version": "3.1.0", "uptimeMs": 36000, "queue": { "running": 0, "waiting": 0 } }
+{
+  "status": "ok",
+  "version": "3.0.0",
+  "uptimeMs": 36000,
+  "queue": {
+    "running": 0,
+    "waiting": 0
+  }
+}
 ```
 
 ---
 
-### GET /health
+### GET /api/health
 
-Einfacher Health-Check-Endpoint für Monitoring und Load-Balancer.
+Liveness-Probe – prüft ob der Server erreichbar ist.
 
+```http
+GET /api/health
+```
+
+**Antwort `200 OK`:**
 ```json
-{ "status": "ok" }
+{
+  "ok": true,
+  "status": "up",
+  "uptime": 3600,
+  "timestamp": "2026-07-21T08:10:23.451Z"
+}
+```
+
+---
+
+### GET /api/health/ready
+
+Readiness-Probe – prüft ob alle internen Services (Queue etc.) bereit sind.
+
+```http
+GET /api/health/ready
+```
+
+**Antwort `200 OK` (bereit):**
+```json
+{
+  "ok": true,
+  "status": "ready",
+  "checks": {
+    "queue": "ok"
+  },
+  "uptime": 3600,
+  "timestamp": "2026-07-21T08:10:23.451Z"
+}
+```
+
+**Antwort `503 Service Unavailable` (nicht bereit):**
+```json
+{
+  "ok": false,
+  "status": "not_ready",
+  "checks": {
+    "queue": "error"
+  },
+  "uptime": 5,
+  "timestamp": "2026-07-21T08:00:05.000Z"
+}
+```
+
+**Docker/Kubernetes Healthcheck Beispiel:**
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:3000/api/health/ready"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
 ```
 
 ---
 
 ### GET /api/history
 
+Gibt die letzten N abgeschlossenen Alarmierungen zurück.
+
+**Query-Parameter:**
+
+| Parameter | Typ | Standard | Beschreibung |
+|---|---|---|---|
+| `limit` | integer 1–100 | `20` | Anzahl zurückgegebener Einträge |
+
 ```http
 GET /api/history?limit=10
+```
+
+**Antwort `200 OK`:**
+```json
+[
+  {
+    "requestId": "a3f9c1",
+    "cleanText": "Brand zwei. Einsatzort: Oderwald Bauwagen Kindergarten.",
+    "spokenText": "Brand zwei. Einsatzort: Oderwald Bauwagen Kindergarten.",
+    "durationMs": 4800,
+    "timestamp": "2026-07-21T08:10:23.451Z"
+  }
+]
+```
+
+---
+
+### GET /api/stats
+
+Liefert aggregierte Server-Statistiken inkl. Speicher, Queue, WebSocket-Verbindungen und RTP-Konfiguration.
+
+```http
+GET /api/stats
+```
+
+**Antwort `200 OK`:**
+```json
+{
+  "ok": true,
+  "server": {
+    "version": "3.1.0",
+    "nodeEnv": "production",
+    "uptime": 3610,
+    "uptimeHuman": "0d 1h 0m 10s",
+    "pid": 1234,
+    "memory": {
+      "heapUsedMB": 42,
+      "heapTotalMB": 64,
+      "rssMB": 80
+    }
+  },
+  "queue": {
+    "running": 0,
+    "waiting": 0,
+    "maxSize": 20
+  },
+  "websocket": {
+    "connectedClients": 2
+  },
+  "rtp": {
+    "host": "239.0.0.1",
+    "port": 5004,
+    "codec": "pcm_mulaw",
+    "bitrate": 64000
+  },
+  "timestamp": "2026-07-21T09:10:33.000Z"
+}
+```
+
+---
+
+### GET /api/stats/history
+
+Alarmhistorie mit Paginierung – detailliertere Variante von `/api/history`.
+
+**Query-Parameter:**
+
+| Parameter | Typ | Standard | Beschreibung |
+|---|---|---|---|
+| `limit` | integer 1–100 | `50` | Anzahl zurückgegebener Einträge |
+
+```http
+GET /api/stats/history?limit=20
+```
+
+**Antwort `200 OK`:**
+```json
+{
+  "ok": true,
+  "total": 20,
+  "limit": 20,
+  "history": [
+    {
+      "requestId": "a3f9c1",
+      "cleanText": "Brand zwei. Einsatzort: Oderwald Bauwagen Kindergarten.",
+      "durationMs": 4800,
+      "timestamp": "2026-07-21T08:10:23.451Z"
+    }
+  ]
+}
 ```
 
 ---
@@ -464,11 +758,68 @@ GET /api/history?limit=10
 
 Listet alle installierten Piper-Stimmen (`.onnx`-Dateien) im `voices/`-Verzeichnis.
 
+```http
+GET /api/voices
+```
+
+**Antwort `200 OK`:**
+```json
+{
+  "ok": true,
+  "defaultVoice": "de_DE-thorsten-high",
+  "voicesDir": "/opt/tts-alarmserver/voices",
+  "voices": [
+    "de_DE-thorsten-high",
+    "de_DE-thorsten-low",
+    "de_DE-thorsten-medium"
+  ]
+}
+```
+
 ---
 
-### GET /api/stats
+### POST /api/voices
 
-Liefert aggregierte Statistiken (Alarmanzahl, Fehlerquote, Durchschnittsdauer).
+Ändert die Standard-Stimme zur Laufzeit. **Erfordert API-Key** im Header.
+
+**Header:**
+
+| Header | Beschreibung |
+|---|---|
+| `X-API-Key` | API-Schlüssel (konfiguriert via `API_KEY` in `.env`) |
+
+**Body-Felder:**
+
+| Feld | Typ | Pflicht | Beschreibung |
+|---|---|---|---|
+| `voice` | string | ✅ | Name der Stimme ohne `.onnx`-Endung |
+
+```http
+POST /api/voices
+Content-Type: application/json
+X-API-Key: mein-geheimer-schluessel
+
+{
+  "voice": "de_DE-thorsten-low"
+}
+```
+
+**Antwort `200 OK`:**
+```json
+{
+  "ok": true,
+  "voice": "de_DE-thorsten-low",
+  "message": "Standard-Stimme auf \"de_DE-thorsten-low\" gesetzt"
+}
+```
+
+**Fehlerantworten:**
+
+| Code | Bedeutung |
+|---|---|
+| `401` | Kein oder ungültiger API-Key |
+| `404` | Stimme nicht im `voices/`-Verzeichnis gefunden |
+| `400` | Ungültige Parameter |
 
 ---
 
