@@ -113,11 +113,11 @@ WF 99-99-2
 Ort:
 Bienenwald Bauwagen
 ```
-
 Resultierende Durchsage:
 
-```
+```text
 Brand zwei Verdächtiger Rauch. Einsatzort: Bienenwald Bauwagen.
+```
 
 Mehr wird **nicht** gesprochen.
 
