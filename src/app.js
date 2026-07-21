@@ -6,6 +6,7 @@
 
 const express        = require('express');
 const path           = require('path');
+const { corsMiddleware } = require('./middleware/corsMiddleware');
 const requestLogger  = require('./middleware/requestLogger');
 const errorHandler   = require('./middleware/errorHandler');
 const alarmRoutes    = require('./routes/alarm');
@@ -20,6 +21,11 @@ const dashboardRoute = require('./routes/dashboard');
 const logger         = require('./logging/logger');
 
 const app = express();
+
+// CORS – muss vor allen Routen registriert sein, damit Preflight-Requests
+// (OPTIONS) korrekt beantwortet werden.
+app.use(corsMiddleware);
+app.options('*', corsMiddleware);
 
 // Body-Parser
 app.use(express.json({ limit: '1mb' }));
