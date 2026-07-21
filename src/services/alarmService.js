@@ -2,85 +2,83 @@
 
 /**
  * Alarm-Service – Haupt-Orchestrierung.
- * Pipeline: rawText → clean → enhance → TTS(WAV) → [Gong voranstellen] → merge WAV → RTP-Stream
+ * Pipeline: rawText → extractAlarmInfo → buildAlarmSpeech → TTS(WAV) → [Gong] → merge WAV → RTP-Stream
  *
- * Gong-Verhalten (wie in der alten server.js):
- *   - ALARM_GONG_FILE in .env setzen (z.B. gong.wav  oder absoluter Pfad)
- *   - Relativer Pfad wird gegen <projectRoot>/public/ aufgelöst
- *   - Existiert die Datei nicht, wird der Gong übersprungen (kein Fehler)
+ * Neue Architektur:
+ *   extractAlarmInfo()  → { stichwort, beschreibung, location, locationAdditional }
+ *   buildAlarmSpeech()  → Stichwort buchstäblich + Beschreibung/Adresse/Bemerkung enhanced
  */
 
-const path             = require('path');
-const fs               = require('fs');
-const { buildSpeechText }  = require('../tts/alarmCleaner');
-const { enhanceSpeech }    = require('../tts/speechEnhancer');
-const { textToWavFiles }   = require('./piperService');
-const { mergeWavFiles }    = require('./ffmpegService');
-const { streamRtp }        = require('../streaming/rtpStreamer');
+const path                           = require('path');
+const fs                             = require('fs');
+const { extractAlarmInfo,
+        deduplicateRoadRefs }        = require('../tts/alarmCleaner');
+const { buildAlarmSpeech }           = require('../tts/speechEnhancer');
+const { textToWavFiles }             = require('./piperService');
+const { mergeWavFiles }              = require('./ffmpegService');
+const { streamRtp }                  = require('../streaming/rtpStreamer');
 const { ensureTmpDir,
         makeTempPath,
-        removeTempFiles }  = require('../utils/tempFiles');
-const { logAlarm }         = require('../logging/alarmLog');
-const historyService       = require('./historyService');
-const DashboardState       = require('./dashboardState');
-const logger               = require('../logging/logger');
-const config               = require('../config');
+        removeTempFiles }            = require('../utils/tempFiles');
+const { logAlarm }                   = require('../logging/alarmLog');
+const historyService                 = require('./historyService');
+const DashboardState                 = require('./dashboardState');
+const logger                         = require('../logging/logger');
+const config                         = require('../config');
 
-// Wurzel des Projekts (zwei Ebenen über src/services/)
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 
-/**
- * Gibt den absoluten Pfad zur Gong-Datei zurück,
- * oder null wenn kein Gong konfiguriert / Datei fehlt.
- */
 function resolveGongPath() {
   const gongFile = config.alarm.gongFile;
   if (!gongFile) return null;
-
   const absPath = path.isAbsolute(gongFile)
     ? gongFile
     : path.join(PROJECT_ROOT, 'public', gongFile);
-
   if (!fs.existsSync(absPath)) {
     logger.warn(`Gong-Datei nicht gefunden, wird übersprungen: ${absPath}`);
     return null;
   }
-
   return absPath;
 }
 
-// ---------------------------------------------------------------------------
-// processAlarm – TTS-Alarm
-// ---------------------------------------------------------------------------
-
 async function processAlarm(rawText, requestId) {
-  const startTime   = Date.now();
-  const tempFiles   = [];
-  let   cleanText   = '';
-  let   spokenText  = '';
+  const startTime  = Date.now();
+  const tempFiles  = [];
+  let   cleanText  = '';
+  let   spokenText = '';
 
   await ensureTmpDir();
   const dashState = DashboardState.getInstance();
 
   try {
-    cleanText = buildSpeechText(rawText);
-    if (!cleanText) throw new Error('Kein verwertbarer Alarmtext nach Bereinigung');
+    // 1. Felder extrahieren
+    const info = extractAlarmInfo(rawText);
 
-    spokenText = enhanceSpeech(cleanText);
+    if (!info.stichwort && !info.location) {
+      throw new Error('Kein verwertbarer Alarmtext nach Bereinigung');
+    }
 
-    // TTS → WAV-Chunks
+    // cleanText für Logging: kompakte menschenlesbare Zusammenfassung
+    cleanText = [
+      info.stichwort,
+      info.beschreibung,
+      info.location ? 'Einsatzort: ' + info.location : '',
+      info.locationAdditional ? 'Einsatzobjekt: ' + info.locationAdditional : '',
+    ].filter(Boolean).join(' | ');
+
+    // 2. Sprachtext aufbauen
+    spokenText = buildAlarmSpeech(info);
+
+    // 3. TTS → WAV-Chunks
     const wavChunks = await textToWavFiles(spokenText);
     tempFiles.push(...wavChunks);
 
-    // Gong-Datei als ersten Chunk einsetzen (wie alte server.js GONG_FILE-Logik)
-    const gongPath = resolveGongPath();
+    // 4. Gong voranstellen
+    const gongPath  = resolveGongPath();
     const allChunks = gongPath ? [gongPath, ...wavChunks] : wavChunks;
+    if (gongPath) logger.info(`[${requestId}] Gong vorangestellt: ${gongPath}`);
 
-    if (gongPath) {
-      logger.info(`[${requestId}] Gong vorangestellt: ${gongPath}`);
-    }
-
-    // Alle Chunks zu einer WAV zusammenführen
+    // 5. Merge + Stream
     const mergedWav = makeTempPath('_merged.wav');
     tempFiles.push(mergedWav);
     await mergeWavFiles(allChunks, mergedWav);
@@ -124,15 +122,10 @@ async function processAlarm(rawText, requestId) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// streamFanfare – direktes Abspielen einer Audiodatei ohne TTS
-// ---------------------------------------------------------------------------
-
 async function streamFanfare(file, requestId) {
   const startTime = Date.now();
   const dashState = DashboardState.getInstance();
 
-  // Pfad auflösen: absolut oder relativ zu public/
   const audioPath = path.isAbsolute(file)
     ? file
     : path.resolve(PROJECT_ROOT, 'public', file);
@@ -149,14 +142,11 @@ async function streamFanfare(file, requestId) {
 
   try {
     await streamRtp(audioPath);
-
     const endTime = Date.now();
     historyService.add({ requestId, startTime, endTime, cleanText: file, spokenText: file, success: true });
     dashState.clearCurrentSpeech();
     dashState.addToHistory({ alarmId: requestId, text: `Fanfare: ${file}`, finishedAt: endTime, success: true });
-
     return { file };
-
   } catch (err) {
     const endTime = Date.now();
     historyService.add({ requestId, startTime, endTime, cleanText: file, spokenText: file, success: false, error: err.message });
