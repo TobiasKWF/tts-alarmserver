@@ -45,6 +45,7 @@ Ab **v3.1** steht ein Live-Dashboard unter `/dashboard` bereit, das per WebSocke
 - 📋 **Serialisierungsqueue** – Alarmierungen laufen nacheinander, kein Audio-Überlapp
 - 📝 **Strukturiertes Logging** – Winston + tägliche Rotation, Request-ID pro Alarm
 - 🛡️ **Fehlertoleranz** – Timeouts auf allen externen Prozessen, kein Server-Absturz bei Einzelfehlern
+- 🪖 **Helmet-Security-Header** – X-Content-Type-Options, X-Frame-Options, Referrer-Policy, COOP u.v.m.
 - 🔒 **CORS-Schutz** – konfigurierbare Origin-Allowlist, WebSocket-kompatibel
 - ⚡ **Rate-Limiting** – Schutz vor Missbrauch auf allen öffentlichen API-Endpunkten (HTTP 429)
 - 🧹 **Eingabe-Sanitisierung** – Null-Byte-Injection und übermäßige JSON-Verschachtelung werden geblockt
@@ -251,6 +252,7 @@ tts-alarmserver/
 │   │   └── index.js                 # Benutzerdefinierte Fehlerklassen
 │   └── middleware/
 │       ├── index.js                 # Barrel-Export aller Middleware-Module
+│       ├── helmetMiddleware.js      # Sichere HTTP-Response-Header (Helmet)
 │       ├── corsMiddleware.js        # CORS-Konfiguration (Origin-Allowlist, Preflight)
 │       ├── rateLimiter.js           # Rate-Limiting: global, /announce, /api/divera
 │       ├── sanitize.js              # Eingabe-Sanitisierung (Null-Bytes, Tiefe, Länge)
@@ -258,8 +260,7 @@ tts-alarmserver/
 │       ├── requestId.js             # Request-ID-Vergabe (UUID)
 │       ├── requestLogger.js         # HTTP-Request-Logging
 │       ├── errorHandler.js          # Globale Fehlerbehandlung
-│       ├── notFoundHandler.js       # 404-Handler
-│       └── sanitize.js              # Eingabe-Sanitisierung
+│       └── notFoundHandler.js       # 404-Handler
 ├── public/
 │   ├── index.html                   # Redirect → /dashboard
 │   └── dashboard/                   # Live-Dashboard-Frontend (v3.1)
@@ -282,7 +283,7 @@ tts-alarmserver/
 | Komponente | Version | Hinweis |
 |---|---|---|
 | Node.js | ≥ 20 LTS | `node --version` |
-| npm-Pakete | siehe `package.json` | `express`, `dotenv`, `ws`, `winston`, `uuid`, `express-rate-limit`, `cors`, `express-validator` |
+| npm-Pakete | siehe `package.json` | `express`, `dotenv`, `ws`, `winston`, `uuid`, `helmet`, `cors`, `express-rate-limit`, `express-validator` |
 | Piper | 2023.11.14-2 | [rhasspy/piper Releases](https://github.com/rhasspy/piper/releases) |
 | ffmpeg | ≥ 4.x | `apt install ffmpeg` |
 | espeak-ng | aktuell | Wird von Piper benötigt: `apt install espeak-ng espeak-ng-data` |
@@ -990,6 +991,26 @@ Die REST-API besitzt standardmäßig **keine Authentifizierung**. Dies ist bewus
 
 Ab v3.1 sind folgende Sicherheitsmechanismen aktiv:
 
+### HTTP-Security-Header (Helmet)
+
+Alle HTTP-Responses erhalten automatisch sichere Header über das [Helmet](https://helmetjs.github.io/)-Paket. Helmet ist als **erstes Middleware** in der Express-Chain registriert und gilt damit für alle Endpunkte ohne Ausnahme.
+
+| Header | Wert (Default) | Schutz gegen |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | MIME-Type-Sniffing |
+| `X-Frame-Options` | `SAMEORIGIN` | Clickjacking via iFrame |
+| `Referrer-Policy` | `no-referrer` | Referrer-Leakage |
+| `Cross-Origin-Opener-Policy` | `same-origin` | Cross-Origin-Angriffe |
+| `X-DNS-Prefetch-Control` | `off` | DNS-Prefetch-Leakage |
+| `X-Download-Options` | `noopen` | IE-spezifische Dateiöffnung |
+| `X-Permitted-Cross-Domain-Policies` | `none` | Flash/Acrobat-Zugriff |
+| `Origin-Agent-Cluster` | `?1` | Cross-Origin-Isolation |
+
+> **Hinweis zu Ausnahmen:** `Content-Security-Policy` und `Cross-Origin-Embedder-Policy` sind
+> bewusst deaktiviert, da das Live-Dashboard inline-Scripts und WebSocket-Verbindungen
+> (`ws://`) zu dynamischen Hosts verwendet. Diese Einschränkungen könnten bei Bedarf mit
+> einer gezielten CSP-Konfiguration schrittweise ergänzt werden.
+
 ### CORS
 
 Alle API-Endpunkte senden korrekte CORS-Header. Der erlaubte Origin wird über `CORS_ORIGIN` / `CORS_ORIGINS` in der `.env` gesteuert. Ohne explizite Konfiguration ist CORS offen (`*`), was für interne Netzwerke ausreichend ist. In Produktionsumgebungen mit Reverse Proxy sollte `CORS_ORIGIN` auf den tatsächlichen Frontend-Origin gesetzt werden.
@@ -1235,6 +1256,7 @@ Dieses Projekt verwendet unter anderem folgende Open-Source-Komponenten:
 | Express | MIT |
 | ws | MIT |
 | Winston | MIT |
+| Helmet | MIT |
 | cors | MIT |
 | express-rate-limit | MIT |
 | Piper TTS | MIT |
@@ -1247,6 +1269,7 @@ Weitere Informationen:
 
 - https://nodejs.org
 - https://expressjs.com
+- https://helmetjs.github.io
 - https://github.com/rhasspy/piper
 - https://ffmpeg.org
 - https://github.com/espeak-ng/espeak-ng
