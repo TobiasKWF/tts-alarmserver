@@ -128,9 +128,12 @@ submitBtn.addEventListener('click', () => {
     return;
   }
 
-  // Rohtext zusammenbauen – gleiche Struktur wie ein echter Alarm
-  let rawText = title;
-  if (text)    rawText += '\n\n' + text;
+  // Alarmstichwort und Alarmtext auf einer Zeile zusammenbauen damit
+  // alarmCleaner den vollstaendigen Text als erste Zeile uebernimmt.
+  // Wuerde text als eigener Absatz folgen, wuerde alarmCleaner ihn
+  // als unbekannte Zeile verwerfen und z.B. "VP" ginge verloren.
+  const firstLine = text ? title + ' ' + text : title;
+  let rawText = firstLine;
   if (address) rawText += '\n\nOrt:\n' + address;
 
   // Modal sofort schliessen
