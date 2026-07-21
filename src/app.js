@@ -7,6 +7,7 @@
 const express        = require('express');
 const path           = require('path');
 const { corsMiddleware } = require('./middleware/corsMiddleware');
+const { sanitize }   = require('./middleware/sanitize');
 const requestLogger  = require('./middleware/requestLogger');
 const errorHandler   = require('./middleware/errorHandler');
 const alarmRoutes    = require('./routes/alarm');
@@ -30,6 +31,10 @@ app.options('*', corsMiddleware);
 // Body-Parser
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// Eingabe-Sanitisierung – muss nach dem Body-Parser laufen (req.body ist dann
+// bereits geparst) und vor allen API-Routen, damit jede Anfrage bereinigt wird.
+app.use(sanitize);
 
 // Statische Dateien (inkl. public/dashboard/)
 app.use(express.static(path.join(__dirname, '..', 'public')));
