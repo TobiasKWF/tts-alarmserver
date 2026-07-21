@@ -55,17 +55,17 @@ const ALARM_MAPPING = {
   'H3Y':  'Hilfeleistung groß mit Menschengefährdung',
 
   // --- Verkehrsunfall ---
-  'VU':   'Verkehrsunfall',
-  'VU1':  'Verkehrsunfall eins',
-  'VU2':  'Verkehrsunfall zwei',
-  'VU3':  'Verkehrsunfall drei',
-  'VU4':  'Verkehrsunfall vier',
-  'VUE':  'Verkehrsunfall mit eingeklemmter Person',
-  'HVU':  'Verkehrsunfall',
-  'HVU1': 'Verkehrsunfall eins',
-  'HVU2': 'Verkehrsunfall zwei',
-  'HVU3': 'Verkehrsunfall drei',
-  'HVU4': 'Verkehrsunfall vier',
+  'VU':    'Verkehrsunfall',
+  'VU1':   'Verkehrsunfall eins',
+  'VU2':   'Verkehrsunfall zwei',
+  'VU3':   'Verkehrsunfall drei',
+  'VU4':   'Verkehrsunfall vier',
+  'VUE':   'Verkehrsunfall mit eingeklemmter Person',
+  'HVU':   'Verkehrsunfall',
+  'HVU1':  'Verkehrsunfall eins',
+  'HVU2':  'Verkehrsunfall zwei',
+  'HVU3':  'Verkehrsunfall drei',
+  'HVU4':  'Verkehrsunfall vier',
 
   // --- Rettungsdienst ---
   'RD':   'Rettungsdienst',
@@ -105,7 +105,29 @@ const ALARM_MAPPING = {
 // ---------------------------------------------------------------------------
 
 const INLINE_ABBR = [
-  // Personen
+  // Kombinierte VU+VP Codes – müssen VOR den Einzelregeln stehen damit
+  // VP nicht isoliert als Nominativ ersetzt wird, sondern grammatikalisch
+  // korrekt als Dativ "mit verletzter Person" erscheint.
+  [/\bVU1\s+VP\b/gi,  'Verkehrsunfall eins mit verletzter Person'],
+  [/\bVU2\s+VP\b/gi,  'Verkehrsunfall zwei mit verletzter Person'],
+  [/\bVU3\s+VP\b/gi,  'Verkehrsunfall drei mit verletzter Person'],
+  [/\bVU4\s+VP\b/gi,  'Verkehrsunfall vier mit verletzter Person'],
+  [/\bVUE\s+VP\b/gi,  'Verkehrsunfall mit eingeklemmter und verletzter Person'],
+  [/\bHVU1\s+VP\b/gi, 'Verkehrsunfall eins mit verletzter Person'],
+  [/\bHVU2\s+VP\b/gi, 'Verkehrsunfall zwei mit verletzter Person'],
+  [/\bHVU3\s+VP\b/gi, 'Verkehrsunfall drei mit verletzter Person'],
+  [/\bHVU4\s+VP\b/gi, 'Verkehrsunfall vier mit verletzter Person'],
+  [/\bVU\s+VP\b/gi,   'Verkehrsunfall mit verletzter Person'],
+  [/\bHVU\s+VP\b/gi,  'Verkehrsunfall mit verletzter Person'],
+
+  // Kombinierte VU+VPs (mehrere verletzte Personen)
+  [/\bVU1\s+VPs\b/gi,  'Verkehrsunfall eins mit verletzten Personen'],
+  [/\bVU2\s+VPs\b/gi,  'Verkehrsunfall zwei mit verletzten Personen'],
+  [/\bVU3\s+VPs\b/gi,  'Verkehrsunfall drei mit verletzten Personen'],
+  [/\bVU4\s+VPs\b/gi,  'Verkehrsunfall vier mit verletzten Personen'],
+  [/\bVU\s+VPs\b/gi,   'Verkehrsunfall mit verletzten Personen'],
+
+  // Personen (allein im Freitext, Nominativ korrekt)
   [/\bVP\b/g,              'verletzte Person'],
   [/\bVPs\b/g,             'verletzte Personen'],
   [/\bMP\b/g,              'mehrere Personen'],
