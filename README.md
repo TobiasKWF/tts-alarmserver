@@ -117,7 +117,7 @@ Bienenwald Bauwagen
 Resultierende Durchsage:
 
 ```
-Brand zwei Verdächtiger Rauch. Einsatzort: Bienenwald Bauwagen.```
+Brand zwei Verdächtiger Rauch. Einsatzort: Bienenwald Bauwagen.
 
 Mehr wird **nicht** gesprochen.
 
