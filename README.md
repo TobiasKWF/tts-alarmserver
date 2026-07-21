@@ -8,7 +8,7 @@
 Modularer Open-Source-Alarmserver für **Feuerwehr, THW, Rettungsdienst, Werkfeuerwehren und Vereine**.
 
 Erzeugt Sprachausgaben mit **Piper TTS** und streamt diese per **RTP (via ffmpeg)** an Lautsprecheranlagen.
-Die Durchsage enthält **ausschließlich** Alarmstichwort und Einsatzort – alle Metadaten werden automatisch herausgefiltert.
+Die Durchsage enthält die **vollständige erste Alarmzeile** – also Alarmstichwort inklusive Einsatzbeschreibung – sowie Einsatzort und optionales Einsatzobjekt. Metadaten wie Datum, Zeit, Einheiten und Fahrzeuge werden automatisch herausgefiltert.
 
 Ab **v3.1** steht ein Live-Dashboard unter `/dashboard` bereit, das per WebSocket in Echtzeit über Serverstatus, aktuelle Durchsage, Queue, Alarmhistorie und Fehlerlog informiert.
 
@@ -117,8 +117,7 @@ Bienenwald Bauwagen
 Resultierende Durchsage:
 
 ```
-Brand zwei. Einsatzort: Bienenwald Bauwagen.
-```
+Brand zwei Verdächtiger Rauch. Einsatzort: Bienenwald Bauwagen.```
 
 Mehr wird **nicht** gesprochen.
 
