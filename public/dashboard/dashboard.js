@@ -52,7 +52,7 @@ btnFanfare.addEventListener('click', async () => {
   clearTimeout(fanfareTimer);
   btnFanfare.disabled = true;
   btnFanfare.className = 'btn-fanfare';
-  btnFanfareLabel.textContent = 'Spiele…';
+  btnFanfareLabel.textContent = 'Spiele\u2026';
 
   try {
     const res = await fetch('/announce/fanfare', {
@@ -62,10 +62,10 @@ btnFanfare.addEventListener('click', async () => {
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     btnFanfare.className = 'btn-fanfare state-ok';
-    btnFanfareLabel.textContent = '✓ Gestartet';
+    btnFanfareLabel.textContent = '\u2713 Gestartet';
   } catch (_) {
     btnFanfare.className = 'btn-fanfare state-err';
-    btnFanfareLabel.textContent = '✗ Fehler';
+    btnFanfareLabel.textContent = '\u2717 Fehler';
     btnFanfare.disabled = false;
   }
 
@@ -74,6 +74,94 @@ btnFanfare.addEventListener('click', async () => {
     btnFanfare.className = 'btn-fanfare';
     btnFanfareLabel.textContent = 'Fanfare';
   }, 2500);
+});
+
+// ---------------------------------------------------------------------------
+// Alarm-Modal
+// ---------------------------------------------------------------------------
+const modal       = $('alarm-modal');
+const btnAlarm    = $('btn-alarm');
+const btnAlarmLbl = $('btn-alarm-label');
+const modalError  = $('alarm-modal-error');
+const submitBtn   = $('modal-submit');
+let   alarmTimer  = null;
+
+function openModal() {
+  $('alarm-title').value   = '';
+  $('alarm-text').value    = '';
+  $('alarm-address').value = '';
+  modalError.classList.add('hidden');
+  modalError.textContent = '';
+  submitBtn.disabled = false;
+  submitBtn.textContent = '\uD83D\uDEA8 Alarm ausl\u00f6sen';
+  modal.classList.remove('hidden');
+  $('alarm-title').focus();
+}
+
+function closeModal() {
+  modal.classList.add('hidden');
+}
+
+btnAlarm.addEventListener('click', openModal);
+$('modal-close').addEventListener('click', closeModal);
+$('modal-cancel').addEventListener('click', closeModal);
+
+// Schliessen per ESC oder Klick auf Overlay
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+});
+modal.addEventListener('click', e => {
+  if (e.target === modal) closeModal();
+});
+
+// Formular absenden
+submitBtn.addEventListener('click', async () => {
+  const title   = $('alarm-title').value.trim();
+  const text    = $('alarm-text').value.trim();
+  const address = $('alarm-address').value.trim();
+
+  if (!title) {
+    modalError.textContent = 'Bitte ein Alarmstichwort eingeben.';
+    modalError.classList.remove('hidden');
+    $('alarm-title').focus();
+    return;
+  }
+
+  // Rohtext zusammenbauen – gleiche Struktur wie ein echter Alarm
+  let rawText = title;
+  if (text)    rawText += '\n\n' + text;
+  if (address) rawText += '\n\nOrt:\n' + address;
+
+  submitBtn.disabled    = true;
+  submitBtn.textContent = 'Wird gesendet\u2026';
+  modalError.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/alarm', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ text: rawText }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'HTTP ' + res.status);
+
+    // Erfolg: Button-Feedback im Header, Modal schliessen
+    closeModal();
+    clearTimeout(alarmTimer);
+    btnAlarm.disabled = true;
+    btnAlarm.className = 'btn-alarm state-ok';
+    btnAlarmLbl.textContent = '\u2713 Alarm gesendet';
+    alarmTimer = setTimeout(() => {
+      btnAlarm.disabled = false;
+      btnAlarm.className = 'btn-alarm';
+      btnAlarmLbl.textContent = 'Alarmierung';
+    }, 3000);
+  } catch (err) {
+    submitBtn.disabled    = false;
+    submitBtn.textContent = '\uD83D\uDEA8 Alarm ausl\u00f6sen';
+    modalError.textContent = 'Fehler: ' + err.message;
+    modalError.classList.remove('hidden');
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -143,12 +231,12 @@ function handleMessage(msg) {
 // Snapshot
 // ---------------------------------------------------------------------------
 function applySnapshot(snap) {
-  if (snap.server)       applyServer(snap.server);
+  if (snap.server)        applyServer(snap.server);
   if (snap.currentSpeech) applySpeech(snap.currentSpeech);
   else                    clearSpeech();
-  if (snap.queue)        applyQueue(snap.queue);
-  if (snap.history)      applyHistory(snap.history);
-  if (snap.errors)       applyErrors(snap.errors);
+  if (snap.queue)         applyQueue(snap.queue);
+  if (snap.history)       applyHistory(snap.history);
+  if (snap.errors)        applyErrors(snap.errors);
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +247,7 @@ function applyServer(s) {
     uptimeBase = Date.now() - s.uptime * 1000;
     tickUptime();
   }
-  if (s.memory)      $('stat-ram').textContent   = (s.memory.heapUsedMB ?? s.memory) + ' MB';
+  if (s.memory)          $('stat-ram').textContent = (s.memory.heapUsedMB ?? s.memory) + ' MB';
   if (s.wsClients != null) $('stat-ws').textContent = s.wsClients;
 }
 
@@ -177,11 +265,10 @@ function applySpeech(sp) {
   if (!sp) { clearSpeech(); return; }
   $('speech-empty').classList.add('hidden');
   $('speech-detail').classList.remove('hidden');
-  $('speech-text').textContent     = sp.text     || '';
-  $('speech-alarm-id').textContent = sp.alarmId  || '';
-  $('speech-voice').textContent    = sp.voice    || '';
+  $('speech-text').textContent     = sp.text    || '';
+  $('speech-alarm-id').textContent = sp.alarmId || '';
+  $('speech-voice').textContent    = sp.voice   || '';
 
-  // Fortschrittsbalken
   clearInterval(progressTimer);
   if (sp.startedAt && sp.durationMs) {
     speechStartedAt = sp.startedAt;

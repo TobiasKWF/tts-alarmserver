@@ -62,6 +62,41 @@ header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: .02em; }
   color: var(--text);
 }
 
+/* Alarm-Button */
+.btn-alarm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(248,113,113,.5);
+  background: rgba(248,113,113,.15);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, color .15s, opacity .15s;
+  white-space: nowrap;
+}
+.btn-alarm:hover:not(:disabled) {
+  background: var(--danger);
+  color: #fff;
+}
+.btn-alarm:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.btn-alarm.state-ok {
+  background: rgba(52,211,153,.15);
+  border-color: rgba(52,211,153,.4);
+  color: var(--success);
+}
+.btn-alarm.state-err {
+  background: rgba(248,113,113,.25);
+  border-color: rgba(248,113,113,.6);
+  color: var(--danger);
+}
+
 /* Fanfare-Button */
 .btn-fanfare {
   display: inline-flex;
@@ -219,3 +254,155 @@ tbody tr:hover { background: rgba(255,255,255,.03); }
 
 /* Utility */
 .hidden { display: none !important; }
+
+/* ============================================================
+   Modal – Manuelle Alarmierung
+   ============================================================ */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.6);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  animation: modal-in .18s ease;
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(.95) translateY(-8px); }
+  to   { opacity: 1; transform: scale(1)   translateY(0); }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h2 {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--danger);
+  margin: 0;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.4rem;
+  cursor: pointer;
+  color: var(--text-muted);
+  line-height: 1;
+  padding: 0 4px;
+  transition: color .15s;
+}
+.modal-close:hover { color: var(--text); }
+
+.modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.form-group .required {
+  color: var(--danger);
+  margin-left: 2px;
+}
+
+.form-group input,
+.form-group textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px 12px;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  transition: border-color .15s;
+  resize: vertical;
+  outline: none;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  border-color: var(--accent);
+}
+
+.modal-error {
+  background: rgba(248,113,113,.12);
+  border: 1px solid rgba(248,113,113,.3);
+  border-radius: 6px;
+  padding: 9px 12px;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.btn-secondary {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 18px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.btn-secondary:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.btn-danger {
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  padding: 8px 18px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.btn-danger:hover:not(:disabled) { opacity: .85; }
+.btn-danger:disabled { opacity: .45; cursor: not-allowed; }
