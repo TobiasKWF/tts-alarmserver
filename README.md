@@ -449,6 +449,7 @@ Alle Einstellungen in `.env`. Vollständige Referenz: [`.env.example`](.env.exam
 | `QUEUE_MAX_SIZE` | `20` | Max. Warteschlangengröße |
 | `HISTORY_MAX_ENTRIES` | `100` | Max. Einträge in der Alarmhistorie |
 | `LOG_LEVEL` | `info` | `error`\|`warn`\|`info`\|`debug` |
+| `API_KEY` | – | Optionaler API-Key für `POST /api/voices` (nicht gesetzt = Endpunkt offen) |
 | `CORS_ORIGIN` | `*` | Erlaubter Origin für CORS (Produktion: explizit setzen!) |
 | `CORS_ORIGINS` | – | Kommaseparierte Allowlist mehrerer Origins (überschreibt `CORS_ORIGIN`) |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Zeitfenster für Rate-Limiting in ms (1 Minute) |
@@ -492,7 +493,7 @@ Nach dem Start:
 | `GET` | `/api/stats` | Aggregierte Server-Statistiken |
 | `GET` | `/api/stats/history` | Alarmhistorie mit Paginierung |
 | `GET` | `/api/voices` | Installierte Piper-Stimmen auflisten |
-| `POST` | `/api/voices` | Standard-Stimme ändern (API-Key erforderlich) |
+| `POST` | `/api/voices` | Standard-Stimme ändern (API-Key optional, siehe `API_KEY`) |
 
 ---
 
@@ -660,6 +661,13 @@ Content-Type: application/json
   "position": 0,
   "message": "Fanfare \"gong.wav\" in Queue eingereiht"
 }
+```
+
+**curl-Beispiel:**
+```bash
+curl -s -X POST http://localhost:3000/announce/fanfare \
+  -H "Content-Type: application/json" \
+  -d '{"file":"gong.wav"}'
 ```
 
 ---
@@ -880,17 +888,24 @@ GET /api/voices
 }
 ```
 
+**curl-Beispiel:**
+```bash
+curl -s http://localhost:3000/api/voices
+```
+
 ---
 
 ### POST /api/voices
 
-Ändert die Standard-Stimme zur Laufzeit. **Erfordert API-Key** im Header.
+Ändert die Standard-Stimme zur Laufzeit.
 
-**Header:**
+> **Authentifizierung:** Wenn `API_KEY` in der `.env` gesetzt ist, muss der Key bei jedem Aufruf mitgesendet werden – entweder als `X-API-Key`-Header oder als `Authorization: Bearer`-Token. Ist `API_KEY` **nicht** gesetzt, ist der Endpunkt offen und benötigt keine Authentifizierung.
+
+**Header (nur wenn `API_KEY` gesetzt):**
 
 | Header | Beschreibung |
 |---|---|
-| `X-API-Key` | API-Schlüssel (konfiguriert via `API_KEY` in `.env`) |
+| `X-API-Key` | API-Schlüssel aus `.env` – **oder** alternativ `Authorization: Bearer <key>` |
 
 **Body-Felder:**
 
@@ -921,9 +936,30 @@ X-API-Key: mein-geheimer-schluessel
 
 | Code | Bedeutung |
 |---|---|
-| `401` | Kein oder ungültiger API-Key |
+| `401` | Kein oder ungültiger API-Key (nur wenn `API_KEY` in `.env` gesetzt) |
 | `404` | Stimme nicht im `voices/`-Verzeichnis gefunden |
 | `400` | Ungültige Parameter |
+
+**curl-Beispiele:**
+
+```bash
+# Mit API-Key als X-API-Key-Header
+curl -s -X POST http://localhost:3000/api/voices \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: mein-geheimer-schluessel" \
+  -d '{"voice":"de_DE-thorsten-low"}'
+
+# Alternativ: API-Key als Bearer-Token
+curl -s -X POST http://localhost:3000/api/voices \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mein-geheimer-schluessel" \
+  -d '{"voice":"de_DE-thorsten-low"}'
+
+# Ohne API-Key (wenn API_KEY in .env nicht gesetzt)
+curl -s -X POST http://localhost:3000/api/voices \
+  -H "Content-Type: application/json" \
+  -d '{"voice":"de_DE-thorsten-low"}'
+```
 
 ---
 
@@ -1011,6 +1047,26 @@ Alle HTTP-Responses erhalten automatisch sichere Header über das [Helmet](https
 > (`ws://`) zu dynamischen Hosts verwendet. Diese Einschränkungen könnten bei Bedarf mit
 > einer gezielten CSP-Konfiguration schrittweise ergänzt werden.
 
+### API-Key-Authentifizierung
+
+Der Endpunkt `POST /api/voices` unterstützt eine **optionale** API-Key-Authentifizierung über die Umgebungsvariable `API_KEY`.
+
+| Szenario | Verhalten |
+|---|---|
+| `API_KEY` nicht gesetzt | Endpunkt ist offen, kein Key erforderlich |
+| `API_KEY` gesetzt | Key muss als `X-API-Key`-Header **oder** `Authorization: Bearer`-Token mitgesendet werden |
+
+Empfehlung für Produktionsumgebungen mit externem Zugriff:
+
+```env
+API_KEY=ein-langer-zufälliger-schluessel
+```
+
+Key generieren:
+```bash
+openssl rand -hex 32
+```
+
 ### CORS
 
 Alle API-Endpunkte senden korrekte CORS-Header. Der erlaubte Origin wird über `CORS_ORIGIN` / `CORS_ORIGINS` in der `.env` gesteuert. Ohne explizite Konfiguration ist CORS offen (`*`), was für interne Netzwerke ausreichend ist. In Produktionsumgebungen mit Reverse Proxy sollte `CORS_ORIGIN` auf den tatsächlichen Frontend-Origin gesetzt werden.
@@ -1052,6 +1108,7 @@ Jeder Request-Body wird nach dem JSON-Parsing automatisch bereinigt:
 - Nur bekannte Systeme (Node-RED, Divera, Leitstelle usw.) auf den Server zugreifen lassen
 - Reverse Proxy nur bei Bedarf einsetzen
 - `CORS_ORIGIN` in Produktionsumgebungen explizit setzen
+- `API_KEY` setzen, wenn `POST /api/voices` nicht offen zugänglich sein soll
 
 Für öffentlich erreichbare Installationen sollte eine zusätzliche Authentifizierung (z. B. über einen Reverse Proxy) verwendet werden.
 
