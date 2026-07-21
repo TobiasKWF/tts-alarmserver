@@ -43,14 +43,12 @@ const ALARM_MAPPING = {
   // --- Hilfeleistung allgemein ---
   'H0':   'Hilfeleistung Lageerkundung',
   'H1':   'Hilfeleistung klein',
+  'H1Y':  'Hilfeleistung klein mit Menschengefährdung',
   'H2':   'Hilfeleistung mittel',
   'H2Y':  'Hilfeleistung mittel mit Menschengefährdung',
   'H3':   'Hilfeleistung groß',
   'H3Y':  'Hilfeleistung groß mit Menschengefährdung',
 
-  // --- Türöffnung / Hilflose Person ---
-  // H 1Y wird in der Leitstelle WF für "Notfalltüröffnung hilflose Person" verwendet
-  'H1Y':  'Türöffnung hilflose Person',
 
   // --- Hilfeleistung Ölspur (H ÖL-Varianten aus Leitstelle WF) ---
   'HOEL1': 'Hilfeleistung Ölspur klein',
@@ -75,7 +73,7 @@ const ALARM_MAPPING = {
 
   // --- Unwetter ---
   'UW':       'Unwetterlage',
-  'UWASSER':  'Unwetterlage Wasser im Keller',
+  'UWASSER':  'Unwetterlage Wasser',
   'UWIND':    'Unwetterlage Sturm',
   'UBLITZ':   'Unwetterlage Blitzschlag',
 
