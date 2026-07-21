@@ -278,7 +278,65 @@ tts-alarmserver/
 | Voice-Modell | `.onnx` + `.onnx.json` | [rhasspy/piper-voices auf HuggingFace](https://huggingface.co/rhasspy/piper-voices) |
 
 ---
+---
 
+# Empfohlene Proxmox LXC-Konfiguration
+
+Der TTS-Alarmserver wurde primär für den Betrieb in einem **Debian 12 (Bookworm)** LXC-Container unter **Proxmox VE** entwickelt und getestet.
+
+## Empfohlene Container-Konfiguration
+
+| Einstellung | Empfehlung |
+|-------------|------------|
+| Betriebssystem | Debian 12 (Bookworm) |
+| Container | Unprivilegierter LXC |
+| Architektur | x86_64 |
+| CPU | 2 vCPU |
+| Arbeitsspeicher | 2 GB RAM |
+| Swap | 512 MB |
+| Festplatte | mindestens 8 GB SSD |
+| Netzwerk | Bridge (vmbr0) |
+
+Der Container benötigt keine besonderen LXC-Features wie **Nesting** oder **Docker-Unterstützung**.
+
+Für den Einsatz der hochwertigen Piper-Stimmen (`thorsten-high`) werden mindestens **4 GB RAM** und **4 CPU-Kerne** empfohlen.
+
+---
+
+# Hardwareanforderungen
+
+## Mindestanforderungen
+
+- x86_64 Prozessor
+- 2 CPU-Kerne
+- 2 GB RAM
+- 8 GB freier SSD-Speicher
+- Debian 12
+
+Geeignet für:
+
+- thorsten-low
+- kleine bis mittlere Alarmtexte
+- normale Alarmfrequenz
+
+## Empfohlene Ausstattung
+
+- 4 CPU-Kerne
+- 4 GB RAM
+- SSD
+- Gigabit-Netzwerk
+
+Geeignet für:
+
+- thorsten-medium
+- thorsten-high
+- längere Alarmtexte
+- mehrere Alarmierungen hintereinander
+- dauerhaft laufendes Dashboard
+
+Eine dedizierte Grafikkarte oder KI-Beschleuniger werden nicht benötigt.
+
+---
 ## Installation
 
 ### Empfohlen: Vollautomatisch (Debian 12 / Proxmox LXC)
@@ -903,7 +961,138 @@ Beispiel-Logeintrag:
   "cleanText": "Brand zwei. Einsatzort: Oderwald Bauwagen Kindergarten."
 }
 ```
+---
 
+# Sicherheit
+
+Der TTS-Alarmserver ist für den Betrieb innerhalb eines **vertrauenswürdigen internen Netzwerks** vorgesehen.
+
+Die REST-API besitzt standardmäßig **keine Authentifizierung**. Dies ist bewusst so umgesetzt, da der Server ausschließlich innerhalb eines geschützten LAN- oder VLAN-Netzes betrieben werden soll.
+
+## Empfehlungen
+
+- Kein direkter Internetzugriff
+- Zugriff ausschließlich aus dem internen Netzwerk
+- Firewall-Regeln verwenden
+- Nur bekannte Systeme (Node-RED, Divera, Leitstelle usw.) auf den Server zugreifen lassen
+- Reverse Proxy nur bei Bedarf einsetzen
+
+Für öffentlich erreichbare Installationen sollte eine zusätzliche Authentifizierung (z. B. über einen Reverse Proxy) verwendet werden.
+
+---
+
+# Backup
+
+Für eine vollständige Sicherung sollten folgende Dateien bzw. Verzeichnisse regelmäßig gesichert werden:
+
+```
+.env
+voices/
+gong/
+logs/ (optional)
+```
+
+Nicht gesichert werden müssen:
+
+```
+node_modules/
+tmp/
+```
+
+Nach einer Neuinstallation können diese automatisch wieder erstellt werden.
+
+---
+
+# Update
+
+## Update über Git
+
+```bash
+cd /opt/tts-alarmserver
+
+git pull
+
+npm install --omit=dev
+
+sudo systemctl restart tts-alarmserver
+```
+
+## Update über das Update-Script
+
+```bash
+tts-alarmserver-update
+```
+
+Vor jedem Update empfiehlt sich eine Sicherung der `.env` sowie eigener Audio- und Sprachdateien.
+
+---
+
+# Fehlerdiagnose
+
+## Piper startet nicht
+
+```bash
+piper --version
+```
+
+Prüfen, ob Piper korrekt installiert wurde und der Pfad in der `.env` stimmt.
+
+---
+
+## ffmpeg nicht gefunden
+
+```bash
+ffmpeg -version
+```
+
+Falls erforderlich:
+
+```bash
+sudo apt install ffmpeg
+```
+
+---
+
+## Dashboard nicht erreichbar
+
+Prüfen:
+
+- Läuft der Dienst?
+- Port 3000 erreichbar?
+- Firewall geöffnet?
+
+```bash
+sudo systemctl status tts-alarmserver
+```
+
+---
+
+## Keine Audioausgabe
+
+Prüfen:
+
+- RTP_HOST
+- RTP_PORT
+- Firewall
+- Multicast-/Unicast-Konfiguration
+- ffmpeg-Log
+
+---
+
+## Voice-Modell fehlt
+
+Kontrollieren:
+
+```
+voices/
+```
+
+Es müssen immer vorhanden sein:
+
+- *.onnx
+- *.onnx.json
+
+Beide Dateien müssen denselben Dateinamen besitzen.
 ---
 
 ## systemd Service
@@ -961,6 +1150,42 @@ journalctl -fu tts-alarmserver
 # Update
 tts-alarmserver-update
 ```
+
+---
+
+# Verwendete Open-Source-Software
+
+Dieses Projekt verwendet unter anderem folgende Open-Source-Komponenten:
+
+| Software | Lizenz |
+|----------|---------|
+| Node.js | MIT |
+| Express | MIT |
+| ws | MIT |
+| Winston | MIT |
+| Piper TTS | MIT |
+| ffmpeg | LGPL/GPL |
+| espeak-ng | GPL-3.0 |
+
+Alle Rechte an den jeweiligen Projekten verbleiben bei den ursprünglichen Autoren.
+
+Weitere Informationen:
+
+- https://nodejs.org
+- https://expressjs.com
+- https://github.com/rhasspy/piper
+- https://ffmpeg.org
+- https://github.com/espeak-ng/espeak-ng
+
+---
+
+# Haftungsausschluss
+
+Diese Software wird ohne Gewährleistung oder Garantie bereitgestellt.
+
+Der TTS-Alarmserver dient ausschließlich der automatisierten Sprachausgabe von Alarmtexten und ersetzt keine primären Alarmierungs-, Einsatzleit- oder Kommunikationssysteme.
+
+Der Betreiber ist selbst für die korrekte Konfiguration, den sicheren Betrieb sowie die Einhaltung der jeweils geltenden gesetzlichen und organisatorischen Vorgaben verantwortlich.
 
 ---
 
