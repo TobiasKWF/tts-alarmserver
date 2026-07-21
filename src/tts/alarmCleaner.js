@@ -9,18 +9,17 @@
  *   2. Mehrzeiliges Label-Format:
  *      Erste Zeile = Stichwort, Ort:\n Adresse, Einsatzortzusatz:\n Objekt
  *
- * Logik für Beschreibung (Feld [1]):
- *   - Generische Stichwort-Codes (H0, H1, H2, H3, H VU-1 ohne eigene VP-Info
- *     usw.) erhalten die Beschreibung angehängt, damit die Durchsage
- *     vollständig ist.
- *   - Alle anderen Codes (B x, BMA, VU, H1Y, HOEL …) sprechen sich durch
- *     den speechEnhancer selbst vollständig aus → Beschreibung wird verworfen
- *     um Dopplung zu vermeiden.
+ * Ergebnis von extractAlarmInfo() enthält jetzt VIER Felder:
+ *   - stichwort      : Roher Code z.B. "B 3Y"  – wird NICHT durch speechEnhancer ge-
+ *                      jagt, TTS spricht Buchstaben direkt ("B drei Y")
+ *   - beschreibung   : Freitext-Teil [1] z.B. "VU mit VP auslaufende Betriebsflüss."
+ *                      Abkürzungen werden aufgelöst, KEIN alarmMapping
+ *   - location       : Adresse aus [2]  – Straßen + Zahlen werden umgewandelt
+ *   - locationAdditional : Objekt + Bemerkung – Abkürzungen + Zahlen
  *
- * Bemerkung (Feld [5+]):
- *   - Immer vollständig übernehmen (Einsatzinfos bleiben erhalten).
- *   - Wenn Bemerkung mit derselben Information wie die Beschreibung beginnt,
- *     wird der redundante Präfix entfernt.
+ * Dopplung Beschreibung/Bemerkung:
+ *   Wenn Bemerkung mit identischer Info wie Beschreibung beginnt, wird der
+ *   redundante Präfix entfernt.
  */
 
 const SECTION_PATTERNS = [
@@ -58,18 +57,6 @@ const ORT_ADDITIONAL_PATTERN = /^(?:Ortzusatz|Einsatzortzusatz|Zusatz|Objekt|Geb
 const ORT_INLINE_ZUSATZ_PATTERN =
   /\b(EG|UG|DG|(?:OG|UG|Stock)\s*\d*|Hinterhaus|Vorderhaus|Seitenflügel|Tor\s*\d+|Aufgang\s*\d+|Eingang\s*\w+|Halle\s*\d*)$/i;
 
-/**
- * Codes deren eingebettetes Stichwort so generisch ist, dass die Beschreibung
- * aus Feld [1] als Zusatzinfo mit in den Alarmtext übernommen wird.
- * Alle anderen Codes sprechen sich durch den speechEnhancer selbst vollständig
- * aus (z.B. B2, BMA, H1Y, HOEL1, VU1 …) – Beschreibung dort verwerfen.
- */
-const GENERIC_CODES = /^(H\s*0|H\s*1|H\s*2|H\s*3|H\s*VU|VU)\b/i;
-
-/**
- * Erkennt das Leitstellen-Hash-Format.
- * Mind. 2 # auf der ersten Zeile, kein Ort:-Label im gesamten Text.
- */
 function isHashFormat(text) {
   const line = text.split(/\r?\n/)[0];
   return (line.match(/#/g) || []).length >= 2 && !ORT_PATTERN.test(text);
@@ -78,17 +65,11 @@ function isHashFormat(text) {
 /**
  * Entfernt redundante Präfixe aus der Bemerkung wenn diese mit derselben
  * Information wie die Beschreibung beginnt.
- * Beispiel:
- *   beschreibung = "Wasser im Keller"
- *   bemerkung    = "Wasser im Keller Schützenhaus"
- *   → Ergebnis    = "Schützenhaus"
  */
 function deduplicateBemerkung(beschreibung, bemerkung) {
   if (!beschreibung || !bemerkung) return bemerkung;
   const norm = s => s.toLowerCase().replace(/[\s,;]+/g, ' ').trim();
-  const bDesc = norm(beschreibung);
-  const bBem  = norm(bemerkung);
-  if (bBem.startsWith(bDesc)) {
+  if (norm(bemerkung).startsWith(norm(beschreibung))) {
     const rest = bemerkung.slice(beschreibung.length).replace(/^[\s,;]+/, '').trim();
     return rest || '';
   }
@@ -96,40 +77,28 @@ function deduplicateBemerkung(beschreibung, bemerkung) {
 }
 
 /**
- * Wandelt das Hash-Format in das mehrzeilige Label-Format um.
+ * Wandelt Hash-Format in Felder um.
+ *
+ * Rückgabe: { stichwort, beschreibung, adresseBase, adresseZusatz }
  *
  * Felder:
- *   [0] Stichwort    → Alarmtext
- *   [1] Beschreibung → nur bei generischen Codes an Stichwort anhängen,
- *                      sonst verworfen (Dopplung)
- *   [2] Adresse      → Ort:
+ *   [0] Stichwort    → roh, kein Mapping
+ *   [1] Beschreibung → Freitext, Abkürzungen auflösen
+ *   [2] Adresse      → Straßen + Zahlen
  *   [3] Zeit         → verworfen
  *   [4] EinsatzNr    → verworfen
- *   [5+] Bemerkung   → Einsatzobjekt: (vollständig, Dopplung zu [1] entfernt)
+ *   [5+] Bemerkung   → vollständig übernehmen, Dopplung zu [1] entfernen
  */
-function normalizeHashFormat(text) {
+function parseHashFields(text) {
   const firstLine = text.split(/\r?\n/)[0];
   const parts = firstLine.split('#').map(p => p.trim());
 
   const stichwort    = parts[0] || '';
   const beschreibung = parts[1] || '';
   const adresse      = parts[2] || '';
-  // parts[3] = Zeit, parts[4] = EinsatzNr – verworfen
   const bemerkungRaw = parts.slice(5).filter(Boolean).join(', ');
+  const bemerkung    = deduplicateBemerkung(beschreibung, bemerkungRaw);
 
-  // Beschreibung nur bei generischen Codes an Stichwort hängen
-  const useDescription = GENERIC_CODES.test(stichwort) && beschreibung;
-  const alarmLine = useDescription
-    ? `${stichwort} ${beschreibung}`
-    : stichwort;
-
-  // Bemerkung: redundante Beschreibungs-Info entfernen
-  const bemerkung = deduplicateBemerkung(
-    useDescription ? '' : beschreibung, // bei generischen Codes schon im alarmLine
-    bemerkungRaw
-  );
-
-  // Adressfeld: Klammerninhalt herauslösen
   let adresseBase   = adresse;
   let adresseZusatz = bemerkung;
 
@@ -147,23 +116,38 @@ function normalizeHashFormat(text) {
     }
   }
 
-  let result = alarmLine + '\n';
-  if (adresseBase)   result += '\nOrt:\n' + adresseBase;
-  if (adresseZusatz) result += '\n\nEinsatzortzusatz:\n' + adresseZusatz;
-
-  return result;
+  return { stichwort, beschreibung, adresseBase, adresseZusatz };
 }
 
+/**
+ * Extrahiert alle Alarminfos aus dem Rohtext.
+ *
+ * Rückgabe:
+ *   stichwort           - Roher Code, NICHT durch alarmMapping jagen
+ *   beschreibung        - Freitext, Abkürzungen auflösen
+ *   location            - Adresse
+ *   locationAdditional  - Objekt + Bemerkung
+ */
 function extractAlarmInfo(rawText) {
-  const text = isHashFormat(rawText) ? normalizeHashFormat(rawText) : rawText;
-  const lines = text.split(/\r?\n/).map(l => l.trim());
+  if (isHashFormat(rawText)) {
+    const { stichwort, beschreibung, adresseBase, adresseZusatz } = parseHashFields(rawText);
+    return {
+      stichwort,
+      beschreibung,
+      location:           adresseBase,
+      locationAdditional: adresseZusatz,
+    };
+  }
 
-  let alarmText               = '';
-  let locationLines           = [];
+  // Mehrzeiliges Label-Format
+  const lines = rawText.split(/\r?\n/).map(l => l.trim());
+
+  let stichwort              = '';
+  let locationLines          = [];
   let locationAdditionalLines = [];
-  let inLocation              = false;
-  let inLocationAdditional    = false;
-  let inRemovedSection        = false;
+  let inLocation             = false;
+  let inLocationAdditional   = false;
+  let inRemovedSection       = false;
 
   for (const line of lines) {
     if (!line) {
@@ -210,13 +194,14 @@ function extractAlarmInfo(rawText) {
       locationAdditionalLines.push(line);
     } else if (inLocation) {
       locationLines.push(line);
-    } else if (!alarmText) {
-      alarmText = line;
+    } else if (!stichwort) {
+      stichwort = line;
     }
   }
 
   return {
-    alarmText:          alarmText.trim(),
+    stichwort:          stichwort.trim(),
+    beschreibung:       '',
     location:           locationLines.filter(Boolean).join(', ').trim(),
     locationAdditional: locationAdditionalLines.filter(Boolean).join(', ').trim(),
   };
@@ -239,23 +224,10 @@ function deduplicateRoadRefs(text) {
   }).replace(/\s{2,}/g, ' ').trim();
 }
 
-function buildSpeechText(rawText) {
-  const { alarmText, location, locationAdditional } = extractAlarmInfo(rawText);
-  const locationClean = deduplicateRoadRefs(location);
-
-  let speech = '';
-  if (alarmText)          speech += alarmText + '. ';
-  if (locationClean)      speech += 'Einsatzort: ' + locationClean + '.';
-  if (locationAdditional) speech += ' Einsatzobjekt: ' + locationAdditional + '.';
-
-  return speech.trim();
-}
-
 module.exports = {
   extractAlarmInfo,
   extractOrtZusatz,
   deduplicateRoadRefs,
-  buildSpeechText,
   isHashFormat,
-  normalizeHashFormat,
+  parseHashFields,
 };
