@@ -10,7 +10,7 @@ Modularer Open-Source-Alarmserver für **Feuerwehr, THW, Rettungsdienst, Werkfeu
 Erzeugt Sprachausgaben mit **Piper TTS** und streamt diese per **RTP (via ffmpeg)** an Lautsprecheranlagen.
 Die Durchsage enthält die **vollständige erste Alarmzeile** – also Alarmstichwort inklusive Einsatzbeschreibung – sowie Einsatzort und optionales Einsatzobjekt. Metadaten wie Datum, Zeit, Einheiten und Fahrzeuge werden automatisch herausgefiltert.
 
-Ab **v3.1** steht ein Live-Dashboard unter `/dashboard` bereit, das per WebSocket in Echtzeit über Serverstatus, aktuelle Durchsage, Queue, Alarmhistorie und Fehlerlog informiert.
+Ab **v3.1** steht ein Live-Dashboard unter `/dashboard` bereit, das per WebSocket in Echtzeit über Serverstatus, aktuelle Durchsage, Queue, Alarmhistorie und Fehlerlog informiert. Über den **🚨 Alarmierungs-Button** kann direkt aus dem Dashboard eine manuelle Alarmierung mit Freitext ausgelöst werden.
 
 ---
 
@@ -49,6 +49,7 @@ Ab **v3.1** steht ein Live-Dashboard unter `/dashboard` bereit, das per WebSocke
 - 🎙️ **Direkte Durchsage** – `/announce` (TTS ohne Bereinigung) und `/announce/fanfare` (Audio-Datei direkt streamen)
 - 🔔 **Divera 24/7 Integration** – Direkter Webhook-Empfang inkl. Node-RED `msg.payload`
 - 🖥️ **Live-Dashboard** – WebSocket-basierte Echtzeit-Oberfläche unter `/dashboard` (v3.1)
+- 🚨 **Manuelle Alarmierung** – Freitext-Alarm direkt aus dem Dashboard auslösbar (v3.1)
 
 ---
 
@@ -66,7 +67,32 @@ Das Dashboard ist nach dem Start unter `http://<IP>:3000/dashboard` erreichbar.
 | **Alarmhistorie** | Letzte 50 abgeschlossene Alarmierungen |
 | **Fehlerlog** | Letzte 20 Fehler mit Zeitstempel |
 
-### Funktionen
+### Header-Buttons
+
+| Button | Funktion |
+|---|---|
+| 🚨 **Alarmierung** | Öffnet das Freitext-Modal für eine manuelle Alarmierung |
+| 🎺 **Fanfare** | Spielt `fanfare.wav` direkt per RTP ab |
+| 🌙 **Dark/Light** | Wechselt zwischen Dark- und Light-Mode |
+
+### Manuelle Alarmierung
+
+Über den **🚨 Alarmierung**-Button im Header öffnet sich ein Modal mit drei Feldern:
+
+| Feld | Pflicht | Beschreibung |
+|---|---|---|
+| **Alarmstichwort** | ✅ | z. B. `B2 Wohnungsbrand` – wird als Alarmtitel gesprochen |
+| **Alarmtext** | – | Ergänzender Freitext, z. B. Lagebeschreibung |
+| **Einsatzort** | – | Adresse oder Objekt, wird als `Ort:` angehängt |
+
+Nach Klick auf **„Alarm auslösen"** schließt das Modal sofort. Der API-Call läuft im Hintergrund und der Header-Button zeigt das Ergebnis:
+
+- `Wird gesendet…` → `✓ Alarm gesendet` (grün) bei Erfolg
+- `✗ <Fehlermeldung>` (rot) bei Fehler – wird nach 3,5 s automatisch zurückgesetzt
+
+Der zusammengebaute Text wird als `POST /api/alarm` abgeschickt und läuft vollständig durch die Bereinigungspipeline (alarmCleaner → speechEnhancer → Piper → RTP).
+
+### Weitere Dashboard-Funktionen
 
 - **Dark/Light-Mode** – per Button umschaltbar, Einstellung wird in `localStorage` gespeichert
 - **Auto-Reconnect** – WebSocket-Verbindung wird mit exponentiellem Backoff (1 s → 30 s) automatisch wiederhergestellt
@@ -162,7 +188,7 @@ HTTP POST /api/alarm          HTTP POST /api/divera
                   websocket/server.js   ← WS-Push an alle /ws/dashboard-Clients
                           │
                           ▼
-                  public/dashboard/     ← Browser-UI (Dark/Light, Auto-Reconnect)
+                  public/dashboard/     ← Browser-UI (Dark/Light, Auto-Reconnect, Alarm-Modal)
 ```
 
 ---
@@ -226,9 +252,9 @@ tts-alarmserver/
 ├── public/
 │   ├── index.html                   # Redirect → /dashboard
 │   └── dashboard/                   # Live-Dashboard-Frontend (v3.1)
-│       ├── index.html
-│       ├── dashboard.js
-│       └── dashboard.css
+│       ├── index.html               # Header mit Alarm- und Fanfare-Button + Modal
+│       ├── dashboard.js             # WS-Client, Alarm-Modal-Logik, Fire-and-Forget
+│       └── dashboard.css            # Dark/Light-Mode, Modal-Styles
 ├── scripts/
 │   ├── install.sh                   # Vollautomatische Installation (Debian 12 / Proxmox LXC)
 │   ├── create-lxc.sh                # Proxmox LXC-Container anlegen
@@ -397,6 +423,8 @@ Nach dem Start:
 ### POST /api/alarm
 
 Alarmtext senden und Durchsage mit vollständiger Bereinigungspipeline auslösen.
+
+> **Dashboard:** Wird auch vom 🚨 Alarmierungs-Button im Dashboard verwendet.
 
 **Body-Felder:**
 
