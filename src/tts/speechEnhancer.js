@@ -23,6 +23,23 @@ const { cleanUnicode }                           = require('../utils/unicode');
 const { replaceNumbers }                          = require('../utils/numbers');
 const { replaceRoadCodes, replaceAbbreviations }  = require('./mappings/roadMapping');
 
+const POSTAL_CODE_DIGITS = {
+  '0': 'null', '1': 'eins', '2': 'zwei', '3': 'drei', '4': 'vier',
+  '5': 'fünf', '6': 'sechs', '7': 'sieben', '8': 'acht', '9': 'neun',
+};
+
+/**
+ * Deutsche Postleitzahlen werden bei Alarmierungen immer ziffernweise
+ * gesprochen, z.B. 38300 → "drei acht drei null null".
+ * Die Ersetzung erfolgt ausschließlich im Einsatzort, damit normale
+ * fünfstellige Zahlen in anderen Textfeldern nicht verändert werden.
+ */
+function replacePostalCodes(text) {
+  return text.replace(/(?<!\d)\d{5}(?!\d)/g, (postalCode) =>
+    postalCode.split('').map(d => POSTAL_CODE_DIGITS[d]).join(' ')
+  );
+}
+
 /**
  * Minimale Pipeline für das Stichwort:
  *   - Unicode bereinigen
@@ -42,6 +59,18 @@ function enhanceSpeech(text) {
   let r = cleanUnicode(text);
   r = replaceRoadCodes(r);
   r = replaceAbbreviations(r);
+  r = replaceNumbers(r);
+  return r.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Vollständige Pipeline für den Einsatzort inklusive PLZ-Ziffernfolge.
+ */
+function enhanceLocation(text) {
+  let r = cleanUnicode(text);
+  r = replaceRoadCodes(r);
+  r = replaceAbbreviations(r);
+  r = replacePostalCodes(r);
   r = replaceNumbers(r);
   return r.replace(/\s+/g, ' ').trim();
 }
@@ -68,10 +97,10 @@ function buildAlarmSpeech(info) {
     parts.push(enhanceSpeech(beschreibung) + '.');
   }
 
-  // Adresse
+  // Adresse: Abkürzungen + Straßen + PLZ ziffernweise
   if (location) {
     const { deduplicateRoadRefs } = require('./alarmCleaner');
-    parts.push('Einsatzort: ' + enhanceSpeech(deduplicateRoadRefs(location)) + '.');
+    parts.push('Einsatzort: ' + enhanceLocation(deduplicateRoadRefs(location)) + '.');
   }
 
   // Objekt + Bemerkung
@@ -82,4 +111,4 @@ function buildAlarmSpeech(info) {
   return parts.join(' ').trim();
 }
 
-module.exports = { enhanceSpeech, enhanceStichwort, buildAlarmSpeech };
+module.exports = { enhanceSpeech, enhanceStichwort, buildAlarmSpeech, enhanceLocation, replacePostalCodes };

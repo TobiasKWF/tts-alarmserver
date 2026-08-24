@@ -23,6 +23,7 @@
  *   FW  → Feuerwehr
  *   HP  → hilflose Person
  *   AS  → Anschlussstelle
+ *   GV  → Gartenverein
  *   usw.
  */
 
@@ -58,6 +59,7 @@ const ABBREVIATION_MAP = [
   [/\bHP\b/g,                         'hilflose Person'],
   [/\bRD\b/g,                         'Rettungsdienst'],
   [/\bFW\b/g,                         'Feuerwehr'],
+  [/\bGV\b/g,                         'Gartenverein'],
   [/\bPol\.?\b/gi,                    'Polizei'],
   [/\bPat\.?\b/gi,                    'Patient'],
   [/\bRTW\b/g,                        'Rettungswagen'],
