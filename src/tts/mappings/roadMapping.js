@@ -44,6 +44,7 @@ const ABBREVIATION_MAP = [
   [/\bAS\b/g,                         'Anschlussstelle'],
   [/\bKGV\b/g,                        'Kleingartenverein'],
   [/\bGV\b/g,                         'Gartenverein'],
+  [/\bAH\b/gi,                        'Altenheim'],
   [/\bSprechverb\.?\b/gi,            'Sprechverbindung'],
   [/\bBetriebsflüss?\.?\b/gi,        'Betriebsflüssigkeiten'],
 
