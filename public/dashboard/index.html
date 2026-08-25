@@ -13,6 +13,9 @@
       <button id="btn-alarm" class="btn-alarm" title="Manuellen Alarm auslösen">
         🚨 <span id="btn-alarm-label">Alarmierung</span>
       </button>
+      <button id="btn-announce" class="btn-fanfare" title="Freien Text als TTS-Durchsage ausgeben">
+        🔊 <span id="btn-announce-label">Durchsage</span>
+      </button>
       <button id="btn-fanfare" class="btn-fanfare" title="Fanfare per RTP abspielen">
         🎺 <span id="btn-fanfare-label">Fanfare</span>
       </button>
@@ -20,6 +23,27 @@
       <button id="theme-toggle" title="Dark/Light-Mode umschalten">🌙</button>
     </div>
   </header>
+
+  <!-- ===== Modal: Freie TTS-Durchsage ===== -->
+  <div id="announce-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="announce-modal-title">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="announce-modal-title">🔊 TTS-Durchsage</h2>
+        <button class="modal-close" id="announce-modal-close" title="Schließen" aria-label="Schließen">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="announce-text">Text <span class="required">*</span></label>
+          <textarea id="announce-text" rows="6" placeholder="Text eingeben, der über die Alarmanlage vorgelesen werden soll ..." maxlength="2000" autofocus></textarea>
+        </div>
+        <div id="announce-modal-error" class="modal-error hidden"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="announce-modal-cancel">Abbrechen</button>
+        <button class="btn-fanfare" id="announce-modal-submit">🔊 Durchsage starten</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ===== Modal: Manuelle Alarmierung ===== -->
   <div id="alarm-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
@@ -51,34 +75,28 @@
   </div>
 
   <main class="grid">
-
-    <!-- Serverstatus -->
     <section class="card" id="card-status">
       <h2>Serverstatus</h2>
       <dl>
-        <dt>Uptime</dt>       <dd id="stat-uptime">–</dd>
-        <dt>RAM</dt>          <dd id="stat-ram">–</dd>
-        <dt>WS-Clients</dt>   <dd id="stat-ws">–</dd>
+        <dt>Uptime</dt><dd id="stat-uptime">–</dd>
+        <dt>RAM</dt><dd id="stat-ram">–</dd>
+        <dt>WS-Clients</dt><dd id="stat-ws">–</dd>
       </dl>
     </section>
 
-    <!-- Aktuelle Durchsage -->
     <section class="card" id="card-speech">
       <h2>Aktuelle Durchsage</h2>
       <div id="speech-empty" class="empty">Keine aktive Durchsage</div>
       <div id="speech-detail" class="hidden">
         <p id="speech-text"></p>
         <dl>
-          <dt>Alarm-ID</dt> <dd id="speech-alarm-id"></dd>
-          <dt>Stimme</dt>   <dd id="speech-voice"></dd>
+          <dt>Alarm-ID</dt><dd id="speech-alarm-id"></dd>
+          <dt>Stimme</dt><dd id="speech-voice"></dd>
         </dl>
-        <div class="progress-wrap">
-          <div class="progress-bar" id="speech-progress"></div>
-        </div>
+        <div class="progress-wrap"><div class="progress-bar" id="speech-progress"></div></div>
       </div>
     </section>
 
-    <!-- Warteschlange -->
     <section class="card" id="card-queue">
       <h2>Warteschlange</h2>
       <div id="queue-empty" class="empty">Warteschlange leer</div>
@@ -88,7 +106,6 @@
       </table>
     </section>
 
-    <!-- Alarmhistorie -->
     <section class="card" id="card-history">
       <h2>Alarmhistorie <small id="history-count"></small></h2>
       <div id="history-empty" class="empty">Noch keine Eintraege</div>
@@ -98,13 +115,11 @@
       </table>
     </section>
 
-    <!-- Fehlerlog -->
     <section class="card" id="card-errors">
       <h2>Fehlerlog <small id="error-count"></small></h2>
       <div id="errors-empty" class="empty">Keine Fehler</div>
       <ul id="errors-list" class="hidden"></ul>
     </section>
-
   </main>
 
   <script src="/dashboard/dashboard.js"></script>
