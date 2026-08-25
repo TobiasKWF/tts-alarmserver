@@ -19,11 +19,6 @@ function replacePostalCodes(text) {
   );
 }
 
-/**
- * Stichwort-Mapping für die Wolfenbütteler Alarmstichworte.
- * H + Zahl bedeutet Hilfeleistung; H 1Y ist Hilfeleistung klein mit Person
- * in Gefahr. H VU-1 bleibt ein eigener Sonderfall.
- */
 function enhanceStichwort(text) {
   let r = cleanUnicode(text).trim();
 
@@ -34,12 +29,10 @@ function enhanceStichwort(text) {
     return 'Hilfeleistung Verkehrsunfall ' + (levels[level] || replaceNumbers(String(level)));
   }
 
-  // H 1Y = Hilfeleistung klein mit Person in Gefahr
   if (/^H\s*1Y$/i.test(r)) {
     return 'Hilfeleistung klein mit Person in Gefahr';
   }
 
-  // H + Zahl = Hilfeleistung. H 1/2/3 entsprechen klein/mittel/groß.
   const hMatch = r.match(/^H\s*([0-9]+)$/i);
   if (hMatch) {
     const level = parseInt(hMatch[1], 10);
@@ -52,7 +45,6 @@ function enhanceStichwort(text) {
     return 'Brand ' + replaceNumbers(brandMatch[1]);
   }
 
-  // B BMA = Brandmeldeanlage
   if (/^B\s*BMA$/i.test(r)) {
     return 'Brand Brandmeldeanlage';
   }
@@ -82,13 +74,21 @@ function enhanceSpeech(text) {
 
 function enhanceLocation(text) {
   let r = cleanUnicode(text);
-  // WF steht in den Einsatzorten für Wolfenbüttel, nicht für Feuerwehr.
-  r = r.replace(/\bWF(?=[-\s])/g, 'Wolfenbüttel');
+
+  // WF steht im Einsatzort für Wolfenbüttel.
+  r = r.replace(/\bWF(?=[-\s])/gi, 'Wolfenbüttel');
+
+  // Postleitzahlen sind für die lokale Alarmierung nicht erforderlich.
+  r = r.replace(/(?<!\d)\d{5}(?!\d)\s*/g, '');
+
+  // Beispiel: "WF-Wolfenbüttel, Ravensberger Straße" ->
+  // "Wolfenbüttel, Ravensberger Straße" und damit nur einmal den Ortsnamen.
+  r = r.replace(/\bWolfenbüttel\s*[-–—]\s*Wolfenbüttel\b/gi, 'Wolfenbüttel');
+
   r = replaceRoadCodes(r);
   r = replaceAbbreviations(r);
-  r = replacePostalCodes(r);
   r = replaceNumbers(r);
-  return r.replace(/\s+/g, ' ').trim();
+  return r.replace(/\s+/g, ' ').replace(/,\s*,/g, ',').trim();
 }
 
 function buildAlarmSpeech(info) {
