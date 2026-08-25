@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================
 # TTS Alarmserver – umfassendes TTS-Testskript
-# Verwendung: bash scripts/test-alarm-comprehensive.sh [host] [port]
+# Verwendung: ./scripts/test-alarm-comprehensive.sh [host] [port]
 # Hinweis: Sendet mehrere Testalarme nacheinander an /api/divera.
 # =============================================================
 
@@ -66,8 +66,13 @@ echo "============================================================="
 echo ""
 
 info "Health-Check..."
-RESP=$(curl -sS -o /dev/null -w "%{http_code}" "${BASE}/health")
-if [ "$RESP" = "200" ]; then pass "Health-Check OK"; else fail "Health-Check HTTP $RESP"; exit 1; fi
+RESP=$(curl -sS -o /dev/null -w "%{http_code}" "${BASE}/api/health")
+if [ "$RESP" = "200" ]; then
+  pass "Health-Check OK"
+else
+  fail "Health-Check HTTP $RESP"
+  exit 1
+fi
 
 echo ""
 
