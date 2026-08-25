@@ -64,11 +64,12 @@ echo ""
 
 # -------------------------------------------------------------
 # 2. Alarmierung – genau ein API-Test
+#    B 2 im Stichwort + VU mit VP in der Beschreibung
 # -------------------------------------------------------------
-info "2) Alarmierung via Divera – ein Test..."
+info "2) Alarmierung via Divera – ein Test (B 2 + VU mit VP)..."
 post_json "Divera-Alarmierung" "${BASE}/api/divera" '{
   "title": "B 2",
-  "text": "B 2 - verdächtiger Rauch\nSondersignal: Ja\nEinsatzortzusatz: Bienenwald Bauwagen\nEinsatznummer: 32423234\n\n----- Einheiten -----\n\nWF FFw Hometown\nWF FFw Leben",
+  "text": "B 2 - VU mit VP, verdächtiger Rauch\nSondersignal: Ja\nEinsatzortzusatz: Bienenwald Bauwagen\nEinsatznummer: 32423234\n\n----- Einheiten -----\n\nWF FFw Hometown\nWF FFw Leben",
   "address": "L495 WF-Homeland WF-West (07), L495",
   "priority": 1
 }'
