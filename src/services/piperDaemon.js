@@ -21,35 +21,32 @@
 
 const { spawn }  = require('child_process');
 const fs         = require('fs');
-const path       = require('path');
 const config     = require('../config');
 const logger     = require('../logging/logger');
 const { makeTempPath, ensureTmpDir } = require('../utils/tempFiles');
 
-// Raw-PCM Parameter die Piper mit thorsten-Stimmen ausgibt
 const PCM_SAMPLE_RATE = config.piper.outputSampleRate;
 const PCM_CHANNELS     = 1;
 const PCM_BIT_DEPTH    = 16;
 
-/** Baut einen WAV-RIFF-Header für Raw-PCM-Daten. */
 function buildWavHeader(pcmLength) {
   const byteRate    = PCM_SAMPLE_RATE * PCM_CHANNELS * (PCM_BIT_DEPTH / 8);
   const blockAlign  = PCM_CHANNELS * (PCM_BIT_DEPTH / 8);
   const buf         = Buffer.alloc(44);
 
-  buf.write('RIFF',             0);
+  buf.write('RIFF', 0);
   buf.writeUInt32LE(36 + pcmLength, 4);
-  buf.write('WAVE',             8);
-  buf.write('fmt ',            12);
-  buf.writeUInt32LE(16,         16);  // PCM chunk size
-  buf.writeUInt16LE(1,          20);  // PCM format
-  buf.writeUInt16LE(PCM_CHANNELS,     22);
-  buf.writeUInt32LE(PCM_SAMPLE_RATE,  24);
-  buf.writeUInt32LE(byteRate,   28);
+  buf.write('WAVE', 8);
+  buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(PCM_CHANNELS, 22);
+  buf.writeUInt32LE(PCM_SAMPLE_RATE, 24);
+  buf.writeUInt32LE(byteRate, 28);
   buf.writeUInt16LE(blockAlign, 32);
-  buf.writeUInt16LE(PCM_BIT_DEPTH,    34);
-  buf.write('data',             36);
-  buf.writeUInt32LE(pcmLength,  40);
+  buf.writeUInt16LE(PCM_BIT_DEPTH, 34);
+  buf.write('data', 36);
+  buf.writeUInt32LE(pcmLength, 40);
   return buf;
 }
 
@@ -57,12 +54,14 @@ class PiperDaemon {
   constructor() {
     this._proc        = null;
     this._ready       = false;
-    this._queue       = [];      // ausstehende Synthese-Aufträge
-    this._current     = null;    // laufender Auftrag
-    this._pcmBufs     = [];      // PCM-Daten des laufenden Auftrags
+    this._queue       = [];
+    this._current     = null;
+    this._pcmBufs     = [];
     this._restarts    = 0;
     this._maxRestarts = 10;
     this._starting    = false;
+    this._synthesisDone = false;
+    this._finishScheduled = false;
   }
 
   static getInstance() {
@@ -72,7 +71,6 @@ class PiperDaemon {
     return PiperDaemon._instance;
   }
 
-  /** Startet den Piper-Prozess (idempotent). */
   async start() {
     if (this._proc || this._starting) return;
     this._starting = true;
@@ -100,9 +98,13 @@ class PiperDaemon {
 
     this._proc.stderr.on('data', (data) => {
       const msg = data.toString().trim();
-      // Piper gibt "Real-time factor" aus wenn fertig
       if (msg.includes('Real-time factor') || msg.includes('Inference seconds')) {
-        this._onSynthesisDone();
+        // stdout und stderr sind getrennte Pipes. Die Fertigmeldung auf stderr
+        // kann daher vor dem letzten stdout-'data'-Event eintreffen. Erst nach
+        // dem aktuellen Event-Loop-Durchlauf finalisieren und bei 0 Bytes noch
+        // kurz auf nachgelieferte PCM-Daten warten.
+        this._synthesisDone = true;
+        this._scheduleSynthesisFinish();
       } else {
         logger.debug(`PiperDaemon stderr: ${msg}`);
       }
@@ -110,18 +112,16 @@ class PiperDaemon {
 
     this._proc.on('close', (code) => {
       logger.warn(`PiperDaemon: Prozess beendet (code=${code})`);
-      this._proc    = null;
-      this._ready   = false;
+      this._proc     = null;
+      this._ready    = false;
       this._starting = false;
 
-      // Laufenden Auftrag mit Fehler abschließen
       if (this._current) {
         this._current.reject(new Error(`Piper-Prozess unerwartet beendet (code=${code})`));
         this._current = null;
         this._pcmBufs = [];
       }
 
-      // Neustart mit Backoff
       if (this._restarts < this._maxRestarts) {
         const delay = Math.min(1000 * Math.pow(2, this._restarts), 30000);
         this._restarts++;
@@ -129,7 +129,6 @@ class PiperDaemon {
         setTimeout(() => this.start(), delay);
       } else {
         logger.error('PiperDaemon: Maximale Neustarts erreicht – Daemon deaktiviert.');
-        // Alle wartenden Aufträge ablehnen
         for (const job of this._queue) {
           job.reject(new Error('PiperDaemon: Daemon nicht verfügbar'));
         }
@@ -142,25 +141,44 @@ class PiperDaemon {
       this._starting = false;
     });
 
-    // Kurze Wartezeit damit Piper das Modell lädt
     await new Promise(resolve => setTimeout(resolve, 100));
-    this._ready   = true;
+    this._ready    = true;
     this._starting = false;
     this._restarts = 0;
     logger.info('PiperDaemon: bereit.');
-
-    // Wartende Aufträge abarbeiten
     this._processQueue();
   }
 
-  /** Wird aufgerufen wenn Piper stderr "Real-time factor" ausgibt = fertig. */
+  _scheduleSynthesisFinish() {
+    if (this._finishScheduled || !this._current) return;
+    this._finishScheduled = true;
+
+    setImmediate(() => {
+      this._finishScheduled = false;
+      if (!this._current || !this._synthesisDone) return;
+
+      if (this._pcmBufs.length > 0) {
+        this._onSynthesisDone();
+        return;
+      }
+
+      // Letzte stdout-Daten können wegen der getrennten Pipes noch ausstehen.
+      setTimeout(() => {
+        if (!this._current || !this._synthesisDone) return;
+        this._onSynthesisDone();
+      }, 25);
+    });
+  }
+
   _onSynthesisDone() {
     if (!this._current) return;
 
-    const job      = this._current;
-    const pcmData  = Buffer.concat(this._pcmBufs);
-    this._current  = null;
-    this._pcmBufs  = [];
+    const job     = this._current;
+    const pcmData = Buffer.concat(this._pcmBufs);
+    this._current = null;
+    this._pcmBufs = [];
+    this._synthesisDone = false;
+    this._finishScheduled = false;
 
     if (pcmData.length === 0) {
       job.reject(new Error('PiperDaemon: Keine PCM-Daten empfangen'));
@@ -168,7 +186,6 @@ class PiperDaemon {
       return;
     }
 
-    // PCM -> WAV schreiben
     const header = buildWavHeader(pcmData.length);
     fs.writeFile(job.outPath, Buffer.concat([header, pcmData]), (err) => {
       if (err) {
@@ -181,7 +198,6 @@ class PiperDaemon {
     });
   }
 
-  /** Nächsten Job aus der Queue starten. */
   _processQueue() {
     if (this._current || this._queue.length === 0) return;
     if (!this._proc || !this._ready) {
@@ -189,9 +205,11 @@ class PiperDaemon {
       return;
     }
 
-    const job     = this._queue.shift();
+    const job = this._queue.shift();
     this._current = job;
     this._pcmBufs = [];
+    this._synthesisDone = false;
+    this._finishScheduled = false;
 
     const payload = JSON.stringify({ text: job.text }) + '\n';
     logger.debug(`PiperDaemon: sende Text (${job.text.length} Zeichen)`);
@@ -205,11 +223,6 @@ class PiperDaemon {
     }
   }
 
-  /**
-   * Synthetisiert Text zu einer WAV-Datei.
-   * @param {string} text
-   * @returns {Promise<string>} Pfad zur WAV-Datei
-   */
   async synthesize(text) {
     await ensureTmpDir();
     const outPath = makeTempPath('.wav');
@@ -220,12 +233,13 @@ class PiperDaemon {
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        // Timeout: Job aus Queue entfernen falls noch nicht gestartet
         const idx = this._queue.indexOf(job);
         if (idx !== -1) this._queue.splice(idx, 1);
         if (this._current === job) {
           this._current = null;
           this._pcmBufs = [];
+          this._synthesisDone = false;
+          this._finishScheduled = false;
         }
         reject(new Error(`PiperDaemon: Timeout nach ${config.piper.timeoutMs}ms`));
         this._processQueue();
@@ -243,7 +257,6 @@ class PiperDaemon {
     });
   }
 
-  /** Beendet den Daemon sauber. */
   stop() {
     this._maxRestarts = 0;
     if (this._proc) {
