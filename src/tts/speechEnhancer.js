@@ -75,15 +75,16 @@ function enhanceSpeech(text) {
 function enhanceLocation(text) {
   let r = cleanUnicode(text);
 
-  // WF steht im Einsatzort für Wolfenbüttel.
-  r = r.replace(/\bWF(?=[-\s])/gi, 'Wolfenbüttel');
+  // WF steht im Einsatzort für Wolfenbüttel. Bei WF-Ortsteil wird der
+  // Bindestrich zur natürlichen Aussprache durch ein Leerzeichen ersetzt.
+  r = r.replace(/\bWF-(?=[A-ZÄÖÜ])/gi, 'Wolfenbüttel ');
+  r = r.replace(/\bWF(?=\s)/gi, 'Wolfenbüttel');
 
   // Postleitzahlen sind für die lokale Alarmierung nicht erforderlich.
   r = r.replace(/(?<!\d)\d{5}(?!\d)\s*/g, '');
 
-  // Beispiel: "WF-Wolfenbüttel, Ravensberger Straße" ->
-  // "Wolfenbüttel, Ravensberger Straße" und damit nur einmal den Ortsnamen.
-  r = r.replace(/\bWolfenbüttel\s*[-–—]\s*Wolfenbüttel\b/gi, 'Wolfenbüttel');
+  // WF-Wolfenbüttel ergibt nach der WF-Auflösung nur einmal Wolfenbüttel.
+  r = r.replace(/\bWolfenbüttel\s+Wolfenbüttel\b/gi, 'Wolfenbüttel');
 
   r = replaceRoadCodes(r);
   r = replaceAbbreviations(r);
