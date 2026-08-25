@@ -4,24 +4,22 @@
  * Sprachoptimierung – Pipeline für natürliche TTS-Ausgabe.
  *
  * NEUE Architektur (Hash-Format):
- *   Das Stichwort (Feld [0], z.B. "B 3Y") wird NICHT durch alarmMapping
- *   gejagt. TTS spricht Buchstaben und Ziffern direkt aus:
- *     "B 3Y"   → "B drei Y"
- *     "H VU-1" → "H V U 1" (buchstäblich)
+ *   Das Stichwort wird kontextabhängig aufgelöst. Insbesondere werden
+ *   Brand- und Verkehrsunfall-Stichworte nicht mit Straßenkürzeln verwechselt.
  *
- *   Beschreibung (Feld [1]), Adresse (Feld [2]) und Bemerkung (Feld [5+])
- *   durchlaufen die normale Pipeline:
- *     Abkürzungen auflösen + Straßencodes + Zahlen
+ * Beispiele:
+ *   "B 2"    → "Brand zwei"
+ *   "B2"     → "Brand zwei"
+ *   "H VU-1" → "Hilfeleistung Verkehrsunfall leicht"
  *
- * Pipeline-Übersicht:
- *   enhanceStichwort(text)  – nur Unicode + Zahlen (keine Codes)
- *   enhanceSpeech(text)     – vollständige Pipeline (Abk., Straßen, Zahlen)
- *   buildAlarmSpeech(info)  – setzt die Felder aus extractAlarmInfo() zusammen
+ * Beschreibung (Feld [1]), Adresse (Feld [2]) und Bemerkung (Feld [5+])
+ * durchlaufen die normale Pipeline:
+ *   Abkürzungen auflösen + Straßencodes + Zahlen
  */
 
-const { cleanUnicode }                           = require('../utils/unicode');
-const { replaceNumbers }                          = require('../utils/numbers');
-const { replaceRoadCodes, replaceAbbreviations }  = require('./mappings/roadMapping');
+const { cleanUnicode } = require('../utils/unicode');
+const { replaceNumbers } = require('../utils/numbers');
+const { replaceRoadCodes, replaceAbbreviations } = require('./mappings/roadMapping');
 
 const POSTAL_CODE_DIGITS = {
   '0': 'null', '1': 'eins', '2': 'zwei', '3': 'drei', '4': 'vier',
@@ -31,8 +29,6 @@ const POSTAL_CODE_DIGITS = {
 /**
  * Deutsche Postleitzahlen werden bei Alarmierungen immer ziffernweise
  * gesprochen, z.B. 38300 → "drei acht drei null null".
- * Die Ersetzung erfolgt ausschließlich im Einsatzort, damit normale
- * fünfstellige Zahlen in anderen Textfeldern nicht verändert werden.
  */
 function replacePostalCodes(text) {
   return text.replace(/(?<!\d)\d{5}(?!\d)/g, (postalCode) =>
@@ -41,13 +37,49 @@ function replacePostalCodes(text) {
 }
 
 /**
- * Minimale Pipeline für das Stichwort:
- *   - Unicode bereinigen
- *   - Zahlen als Zahlwörter sprechen ("3" → "drei")
- *   - KEIN alarmMapping, KEIN Straßencode-Ersetzen
+ * Stichwort-Mapping.
+ *
+ * Wichtig: Das generische B2 darf hier NICHT als Bundesstraße interpretiert
+ * werden. Im Stichwort-Kontext bedeutet B = Brand.
+ *
+ * H VU-1 wird als Hilfeleistung Verkehrsunfall leicht gesprochen.
  */
 function enhanceStichwort(text) {
-  let r = cleanUnicode(text);
+  let r = cleanUnicode(text).trim();
+
+  // Hilfeleistung + Verkehrsunfall-Schweregrad
+  // Unterstützt H VU-1, HVU-1, H VU 1 und H VU1.
+  const hVuMatch = r.match(/^H\s*V\s*U\s*[- ]?([0-9]+)$/i);
+  if (hVuMatch) {
+    const level = parseInt(hVuMatch[1], 10);
+    const levels = {
+      1: 'leicht',
+      2: 'mittel',
+      3: 'schwer',
+    };
+    return 'Hilfeleistung Verkehrsunfall ' + (levels[level] || replaceNumbers(String(level)));
+  }
+
+  // Brandstichwort: B 1 / B1 / B 2 / B2 ...
+  const brandMatch = r.match(/^B\s*([0-9]+)$/i);
+  if (brandMatch) {
+    return 'Brand ' + replaceNumbers(brandMatch[1]);
+  }
+
+  // Reines Verkehrsunfall-Stichwort
+  if (/^V\s*U$/i.test(r)) {
+    return 'Verkehrsunfall';
+  }
+
+  // Reines VU mit Schweregrad, z.B. VU-1
+  const vuMatch = r.match(/^V\s*U\s*[- ]?([0-9]+)$/i);
+  if (vuMatch) {
+    const level = parseInt(vuMatch[1], 10);
+    const levels = { 1: 'leicht', 2: 'mittel', 3: 'schwer' };
+    return 'Verkehrsunfall ' + (levels[level] || replaceNumbers(String(level)));
+  }
+
+  // Andere Stichworte wie bisher: Zahlen in Zahlwörter umwandeln.
   r = replaceNumbers(r);
   return r.replace(/\s+/g, ' ').trim();
 }
@@ -87,23 +119,19 @@ function buildAlarmSpeech(info) {
 
   const parts = [];
 
-  // Stichwort: roh vorlesen (nur Zahlen umwandeln)
   if (stichwort) {
     parts.push(enhanceStichwort(stichwort) + '.');
   }
 
-  // Beschreibung: Abkürzungen + Zahlen
   if (beschreibung) {
     parts.push(enhanceSpeech(beschreibung) + '.');
   }
 
-  // Adresse: Abkürzungen + Straßen + PLZ ziffernweise
   if (location) {
     const { deduplicateRoadRefs } = require('./alarmCleaner');
     parts.push('Einsatzort: ' + enhanceLocation(deduplicateRoadRefs(location)) + '.');
   }
 
-  // Objekt + Bemerkung
   if (locationAdditional) {
     parts.push('Einsatzobjekt: ' + enhanceSpeech(locationAdditional) + '.');
   }
