@@ -22,15 +22,30 @@ function replacePostalCodes(text) {
 function enhanceStichwort(text) {
   let r = cleanUnicode(text).trim();
 
-  const hVuMatch = r.match(/^H\s*V\s*U\s*[- ]?([0-9]+)$/i);
+  const hVuMatch = r.match(/^H\s*V\s*U\s*[- ]?([0-9]+)(Y)?$/i);
   if (hVuMatch) {
     const level = parseInt(hVuMatch[1], 10);
     const levels = { 1: 'klein', 2: 'mittel', 3: 'groß' };
+    if (hVuMatch[2]) {
+      const injured = { 1: 'eine verletzte Person', 2: 'zwei verletzte Personen', 3: 'drei verletzte Personen' };
+      return 'Hilfeleistung Verkehrsunfall ' + (injured[level] || replaceNumbers(String(level)) + ' verletzte Personen');
+    }
     return 'Hilfeleistung Verkehrsunfall ' + (levels[level] || replaceNumbers(String(level)));
   }
 
   if (/^H\s*1Y$/i.test(r)) {
     return 'Hilfeleistung klein mit Person in Gefahr';
+  }
+
+  if (/^H\s*GAS$/i.test(r)) {
+    return 'Hilfeleistung Gas';
+  }
+
+  const hOilMatch = r.match(/^H\s*ÖL\s*[- ]?([0-9]+)$/i);
+  if (hOilMatch) {
+    const level = parseInt(hOilMatch[1], 10);
+    const levels = { 1: 'klein', 2: 'mittel', 3: 'groß' };
+    return 'Hilfeleistung Öl ' + (levels[level] || replaceNumbers(String(level)));
   }
 
   const hMatch = r.match(/^H\s*([0-9]+)$/i);
@@ -45,8 +60,23 @@ function enhanceStichwort(text) {
     return 'Brand ' + replaceNumbers(brandMatch[1]);
   }
 
+  const brandYMatch = r.match(/^B\s*([0-9]+)Y$/i);
+  if (brandYMatch) {
+    const level = parseInt(brandYMatch[1], 10);
+    const levels = { 1: 'klein', 2: 'mittel', 3: 'groß' };
+    return 'Brand ' + (levels[level] || replaceNumbers(String(level))) + ' mit Menschenleben in Gefahr';
+  }
+
+  if (/^B\s*WALD\s*[- ]?1$/i.test(r)) {
+    return 'Brand Wald klein';
+  }
+
   if (/^B\s*BMA$/i.test(r)) {
     return 'Brand Brandmeldeanlage';
+  }
+
+  if (/^U\s*WASSER$/i.test(r)) {
+    return 'Unwetter';
   }
 
   if (/^V\s*U$/i.test(r)) {
