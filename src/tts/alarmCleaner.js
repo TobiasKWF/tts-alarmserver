@@ -6,6 +6,7 @@
  * Unterstützte Eingangsformate:
  *   1. Leitstellen-Hash-Format (eine Zeile, #-getrennt)
  *   2. Mehrzeiliges Label-Format
+ *   3. Divera-Rohtext: erste Zeile Stichwort, folgende Zeilen Beschreibung
  */
 
 const SECTION_PATTERNS = [
@@ -58,10 +59,6 @@ function deduplicateBemerkung(beschreibung, bemerkung) {
   return bemerkung;
 }
 
-/**
- * Normalisiert nur das Stichwort. So kann ein vorgelagerter TTS-Pfad
- * H VU-1 oder B 2 nicht mehr versehentlich als Einzelzeichen behandeln.
- */
 function normalizeStichwort(stichwort) {
   const value = String(stichwort || '').trim();
 
@@ -130,6 +127,7 @@ function extractAlarmInfo(rawText) {
 
   const lines = rawText.split(/\r?\n/).map(l => l.trim());
   let stichwort               = '';
+  let beschreibungLines       = [];
   let locationLines           = [];
   let locationAdditionalLines = [];
   let inLocation              = false;
@@ -183,12 +181,15 @@ function extractAlarmInfo(rawText) {
       locationLines.push(line);
     } else if (!stichwort) {
       stichwort = normalizeStichwort(line);
+    } else {
+      // Divera: Nach dem Stichwort folgen die Beschreibungzeilen.
+      beschreibungLines.push(line);
     }
   }
 
   return {
     stichwort: stichwort.trim(),
-    beschreibung: '',
+    beschreibung: beschreibungLines.join(', ').trim(),
     location: locationLines.filter(Boolean).join(', ').trim(),
     locationAdditional: locationAdditionalLines.filter(Boolean).join(', ').trim(),
   };
