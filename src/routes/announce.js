@@ -12,7 +12,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const logger                          = require('../utils/logger').child({ service: 'AnnounceRoute' });
 const queueService                    = require('../services/queueService');
-const { processAlarm, streamFanfare } = require('../services/alarmService');
+const { processAlarm, processAnnouncement, streamFanfare } = require('../services/alarmService');
 const eventBus                        = require('../events/eventBus');
 const { ValidationError, QueueFullError } = require('../errors');
 const config                          = require('../config');
@@ -20,12 +20,11 @@ const config                          = require('../config');
 const router = Router();
 
 // ---------------------------------------------------------------------------
-// POST /announce  – TTS-Durchsage
+// POST /announce  – freie TTS-Durchsage, immer Priorität 5
 // ---------------------------------------------------------------------------
 
 router.post('/', [
   body('text').isString().trim().notEmpty().isLength({ max: 2000 }),
-  body('priority').optional().isInt({ min: 1, max: 10 }),
 ], (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -34,18 +33,18 @@ router.post('/', [
       throw new ValidationError('Ungültige Anfrageparameter', details);
     }
 
-    const { text, priority } = req.body;
+    const { text } = req.body;
     const alarmId = uuidv4();
-    const prio    = priority || config.queue.defaultPriority;
+    const prio = 5;
 
     eventBus.emit('alarm.received', { alarmId, requestId: req.requestId, text, source: 'announce', priority: prio });
 
     queueService.enqueue(
-      () => processAlarm(text, alarmId),
+      () => processAnnouncement(text, alarmId),
       { id: alarmId, priority: prio, source: 'announce', text }
     ).catch(err => logger.error('Announce Queue-Fehler', { alarmId, error: err.message }));
 
-    logger.info('Durchsage eingereiht', { alarmId, text: text.slice(0, 80) });
+    logger.info('Durchsage eingereiht', { alarmId, text: text.slice(0, 80), priority: prio });
 
     res.status(202).json({
       ok: true, alarmId,
@@ -82,7 +81,6 @@ router.post('/fanfare', [
       text: `[Fanfare: ${file}]`, source: 'fanfare', priority: prio,
     });
 
-    // streamFanfare – kein TTS, direkt WAV → RTP
     queueService.enqueue(
       () => streamFanfare(file, alarmId),
       { id: alarmId, priority: prio, source: 'fanfare', text: `[Fanfare: ${file}]` }
