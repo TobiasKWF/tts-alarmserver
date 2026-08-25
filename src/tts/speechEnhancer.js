@@ -2,19 +2,6 @@
 
 /**
  * Sprachoptimierung – Pipeline für natürliche TTS-Ausgabe.
- *
- * NEUE Architektur (Hash-Format):
- *   Das Stichwort wird kontextabhängig aufgelöst. Insbesondere werden
- *   Brand- und Verkehrsunfall-Stichworte nicht mit Straßenkürzeln verwechselt.
- *
- * Beispiele:
- *   "B 2"    → "Brand zwei"
- *   "B2"     → "Brand zwei"
- *   "H VU-1" → "Hilfeleistung Verkehrsunfall klein"
- *
- * Beschreibung (Feld [1]), Adresse (Feld [2]) und Bemerkung (Feld [5+])
- * durchlaufen die normale Pipeline:
- *   Abkürzungen auflösen + Straßencodes + Zahlen
  */
 
 const { cleanUnicode } = require('../utils/unicode');
@@ -32,23 +19,42 @@ function replacePostalCodes(text) {
   );
 }
 
+/**
+ * Stichwort-Mapping für die Wolfenbütteler Alarmstichworte.
+ * H + Zahl bedeutet Hilfeleistung; H 1Y ist Hilfeleistung klein mit Person
+ * in Gefahr. H VU-1 bleibt ein eigener Sonderfall.
+ */
 function enhanceStichwort(text) {
   let r = cleanUnicode(text).trim();
 
   const hVuMatch = r.match(/^H\s*V\s*U\s*[- ]?([0-9]+)$/i);
   if (hVuMatch) {
     const level = parseInt(hVuMatch[1], 10);
-    const levels = {
-      1: 'klein',
-      2: 'mittel',
-      3: 'schwer',
-    };
+    const levels = { 1: 'klein', 2: 'mittel', 3: 'groß' };
     return 'Hilfeleistung Verkehrsunfall ' + (levels[level] || replaceNumbers(String(level)));
+  }
+
+  // H 1Y = Hilfeleistung klein mit Person in Gefahr
+  if (/^H\s*1Y$/i.test(r)) {
+    return 'Hilfeleistung klein mit Person in Gefahr';
+  }
+
+  // H + Zahl = Hilfeleistung. H 1/2/3 entsprechen klein/mittel/groß.
+  const hMatch = r.match(/^H\s*([0-9]+)$/i);
+  if (hMatch) {
+    const level = parseInt(hMatch[1], 10);
+    const levels = { 1: 'klein', 2: 'mittel', 3: 'groß' };
+    return 'Hilfeleistung ' + (levels[level] || replaceNumbers(String(level)));
   }
 
   const brandMatch = r.match(/^B\s*([0-9]+)$/i);
   if (brandMatch) {
     return 'Brand ' + replaceNumbers(brandMatch[1]);
+  }
+
+  // B BMA = Brandmeldeanlage
+  if (/^B\s*BMA$/i.test(r)) {
+    return 'Brand Brandmeldeanlage';
   }
 
   if (/^V\s*U$/i.test(r)) {
@@ -58,7 +64,7 @@ function enhanceStichwort(text) {
   const vuMatch = r.match(/^V\s*U\s*[- ]?([0-9]+)$/i);
   if (vuMatch) {
     const level = parseInt(vuMatch[1], 10);
-    const levels = { 1: 'klein', 2: 'mittel', 3: 'schwer' };
+    const levels = { 1: 'klein', 2: 'mittel', 3: 'groß' };
     return 'Verkehrsunfall ' + (levels[level] || replaceNumbers(String(level)));
   }
 
@@ -76,6 +82,8 @@ function enhanceSpeech(text) {
 
 function enhanceLocation(text) {
   let r = cleanUnicode(text);
+  // WF steht in den Einsatzorten für Wolfenbüttel, nicht für Feuerwehr.
+  r = r.replace(/\bWF(?=[-\s])/g, 'Wolfenbüttel');
   r = replaceRoadCodes(r);
   r = replaceAbbreviations(r);
   r = replacePostalCodes(r);
