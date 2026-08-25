@@ -15,11 +15,12 @@ const FANFARE_FILE   = 'fanfare.wav';
 let ws              = null;
 let reconnectDelay  = RECONNECT_BASE;
 let reconnectTimer  = null;
-let uptimeBase      = null;   // Date.now() - uptime*1000
+let uptimeBase      = null;
 let progressTimer   = null;
 let speechStartedAt = null;
 let speechDuration  = null;
 let fanfareTimer    = null;
+let announceTimer   = null;
 
 // ---------------------------------------------------------------------------
 // DOM helpers
@@ -39,6 +40,98 @@ $('theme-toggle').addEventListener('click', () => {
   html.dataset.theme = next;
   localStorage.setItem('dashboard-theme', next);
   $('theme-toggle').textContent = next === 'dark' ? '\uD83C\uDF19' : '\u2600\uFE0F';
+});
+
+// ---------------------------------------------------------------------------
+// TTS-Durchsage – freie Texteingabe
+// ---------------------------------------------------------------------------
+const btnAnnounce      = $('btn-announce');
+const btnAnnounceLabel = $('btn-announce-label');
+const announceModal    = $('announce-modal');
+const announceError    = $('announce-modal-error');
+const announceSubmit   = $('announce-modal-submit');
+
+function openAnnounceModal() {
+  announceError.classList.add('hidden');
+  announceError.textContent = '';
+  announceSubmit.disabled = false;
+  announceSubmit.textContent = '\uD83D\uDD0A Durchsage starten';
+  $('announce-modal').classList.remove('hidden');
+  $('announce-text').focus();
+}
+
+function closeAnnounceModal() {
+  announceModal.classList.add('hidden');
+}
+
+btnAnnounce.addEventListener('click', openAnnounceModal);
+$('announce-modal-close').addEventListener('click', closeAnnounceModal);
+$('announce-modal-cancel').addEventListener('click', closeAnnounceModal);
+
+announceModal.addEventListener('click', e => {
+  if (e.target === announceModal) closeAnnounceModal();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !announceModal.classList.contains('hidden')) closeAnnounceModal();
+});
+
+// Strg+Enter bzw. Cmd+Enter startet die Durchsage direkt aus dem Textfeld.
+$('announce-text').addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault();
+    announceSubmit.click();
+  }
+});
+
+announceSubmit.addEventListener('click', async () => {
+  const text = $('announce-text').value.trim();
+  const priority = Number.parseInt($('announce-priority').value, 10) || 5;
+
+  if (!text) {
+    announceError.textContent = 'Bitte einen Text für die Durchsage eingeben.';
+    announceError.classList.remove('hidden');
+    $('announce-text').focus();
+    return;
+  }
+
+  if (text.length > 2000) {
+    announceError.textContent = 'Der Text darf maximal 2000 Zeichen enthalten.';
+    announceError.classList.remove('hidden');
+    $('announce-text').focus();
+    return;
+  }
+
+  announceSubmit.disabled = true;
+  announceSubmit.textContent = '\u23F3 Wird eingereiht...';
+
+  try {
+    const res = await fetch('/announce', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, priority }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+
+    closeAnnounceModal();
+    $('announce-text').value = '';
+    btnAnnounce.disabled = true;
+    btnAnnounce.className = 'btn-fanfare state-ok';
+    btnAnnounceLabel.textContent = '\u2713 Durchsage gestartet';
+
+    clearTimeout(announceTimer);
+    announceTimer = setTimeout(() => {
+      btnAnnounce.disabled = false;
+      btnAnnounce.className = 'btn-fanfare';
+      btnAnnounceLabel.textContent = 'Durchsage';
+    }, 3000);
+  } catch (err) {
+    announceSubmit.disabled = false;
+    announceSubmit.textContent = '\uD83D\uDD0A Durchsage starten';
+    announceError.textContent = `Durchsage konnte nicht gestartet werden: ${err.message}`;
+    announceError.classList.remove('hidden');
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -106,7 +199,6 @@ btnAlarm.addEventListener('click', openModal);
 $('modal-close').addEventListener('click', closeModal);
 $('modal-cancel').addEventListener('click', closeModal);
 
-// Schliessen per ESC oder Klick auf Overlay
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
 });
@@ -114,13 +206,11 @@ modal.addEventListener('click', e => {
   if (e.target === modal) closeModal();
 });
 
-// Formular absenden – Modal schliesst sofort, API-Call laeuft im Hintergrund
 submitBtn.addEventListener('click', () => {
   const title   = $('alarm-title').value.trim();
   const text    = $('alarm-text').value.trim();
   const address = $('alarm-address').value.trim();
 
-  // Pflichtfeld-Pruefung VOR dem Schliessen
   if (!title) {
     modalError.textContent = 'Bitte ein Alarmstichwort eingeben.';
     modalError.classList.remove('hidden');
@@ -128,24 +218,17 @@ submitBtn.addEventListener('click', () => {
     return;
   }
 
-  // Alarmstichwort und Alarmtext auf einer Zeile zusammenbauen damit
-  // alarmCleaner den vollstaendigen Text als erste Zeile uebernimmt.
-  // Wuerde text als eigener Absatz folgen, wuerde alarmCleaner ihn
-  // als unbekannte Zeile verwerfen und z.B. "VP" ginge verloren.
   const firstLine = text ? title + ' ' + text : title;
   let rawText = firstLine;
   if (address) rawText += '\n\nOrt:\n' + address;
 
-  // Modal sofort schliessen
   closeModal();
 
-  // Header-Button: Sende-Zustand anzeigen
   clearTimeout(alarmTimer);
   btnAlarm.disabled = true;
   btnAlarm.className = 'btn-alarm state-sending';
   btnAlarmLbl.textContent = 'Wird gesendet\u2026';
 
-  // API-Call im Hintergrund
   fetch('/api/alarm', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -154,12 +237,10 @@ submitBtn.addEventListener('click', () => {
     .then(res => res.json().then(json => ({ ok: res.ok, json })))
     .then(({ ok, json }) => {
       if (!ok) throw new Error(json.error || 'HTTP-Fehler');
-      // Erfolg
       btnAlarm.className = 'btn-alarm state-ok';
       btnAlarmLbl.textContent = '\u2713 Alarm gesendet';
     })
     .catch(err => {
-      // Fehler nur im Header-Button sichtbar
       btnAlarm.className = 'btn-alarm state-err';
       btnAlarmLbl.textContent = '\u2717 ' + err.message;
     })
@@ -259,7 +340,6 @@ function applyServer(s) {
   if (s.wsClients != null) $('stat-ws').textContent  = s.wsClients;
 }
 
-// Live-Uptime-Ticker
 setInterval(() => { if (uptimeBase != null) tickUptime(); }, 1000);
 function tickUptime() {
   const secs = Math.floor((Date.now() - uptimeBase) / 1000);
