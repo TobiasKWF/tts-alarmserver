@@ -53,7 +53,7 @@ echo ""
 # 1. Health-Check
 # -------------------------------------------------------------
 info "1) Health-Check..."
-RESP=$(curl -sS -o /dev/null -w "%{http_code}" "${BASE}/health")
+RESP=$(curl -sS -o /dev/null -w "%{http_code}" "${BASE}/api/health")
 if [ "$RESP" = "200" ]; then
   pass "Health-Check OK (HTTP 200)"
 else
