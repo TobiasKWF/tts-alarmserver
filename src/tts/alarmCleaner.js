@@ -4,22 +4,8 @@
  * Alarmtext-Bereinigung.
  *
  * Unterstützte Eingangsformate:
- *   1. Leitstellen-Hash-Format (eine Zeile, #-getrennt):
- *      STICHWORT # Beschreibung # Adresse # HH:MM:SS # EinsatzNr [# Bemerkung]
- *   2. Mehrzeiliges Label-Format:
- *      Erste Zeile = Stichwort, Ort:\n Adresse, Einsatzortzusatz:\n Objekt
- *
- * Ergebnis von extractAlarmInfo() enthält jetzt VIER Felder:
- *   - stichwort      : Roher Code z.B. "B 3Y"  – wird NICHT durch speechEnhancer ge-
- *                      jagt, TTS spricht Buchstaben direkt ("B drei Y")
- *   - beschreibung   : Freitext-Teil [1] z.B. "VU mit VP auslaufende Betriebsflüss."
- *                      Abkürzungen werden aufgelöst, KEIN alarmMapping
- *   - location       : Adresse aus [2]  – Straßen + Zahlen werden umgewandelt
- *   - locationAdditional : Objekt + Bemerkung – Abkürzungen + Zahlen
- *
- * Dopplung Beschreibung/Bemerkung:
- *   Wenn Bemerkung mit identischer Info wie Beschreibung beginnt, wird der
- *   redundante Präfix entfernt.
+ *   1. Leitstellen-Hash-Format (eine Zeile, #-getrennt)
+ *   2. Mehrzeiliges Label-Format
  */
 
 const SECTION_PATTERNS = [
@@ -62,10 +48,6 @@ function isHashFormat(text) {
   return (line.match(/#/g) || []).length >= 2 && !ORT_PATTERN.test(text);
 }
 
-/**
- * Entfernt redundante Präfixe aus der Bemerkung wenn diese mit derselben
- * Information wie die Beschreibung beginnt.
- */
 function deduplicateBemerkung(beschreibung, bemerkung) {
   if (!beschreibung || !bemerkung) return bemerkung;
   const norm = s => s.toLowerCase().replace(/[\s,;]+/g, ' ').trim();
@@ -77,23 +59,41 @@ function deduplicateBemerkung(beschreibung, bemerkung) {
 }
 
 /**
- * Wandelt Hash-Format in Felder um.
- *
- * Rückgabe: { stichwort, beschreibung, adresseBase, adresseZusatz }
- *
- * Felder:
- *   [0] Stichwort    → roh, kein Mapping
- *   [1] Beschreibung → Freitext, Abkürzungen auflösen
- *   [2] Adresse      → Straßen + Zahlen
- *   [3] Zeit         → verworfen
- *   [4] EinsatzNr    → verworfen
- *   [5+] Bemerkung   → vollständig übernehmen, Dopplung zu [1] entfernen
+ * Normalisiert nur das Stichwort. So kann ein vorgelagerter TTS-Pfad
+ * H VU-1 oder B 2 nicht mehr versehentlich als Einzelzeichen behandeln.
  */
+function normalizeStichwort(stichwort) {
+  const value = String(stichwort || '').trim();
+
+  const hVu = value.match(/^H\s*V\s*U\s*[- ]?([0-9]+)$/i);
+  if (hVu) {
+    const levels = { 1: 'klein', 2: 'mittel', 3: 'schwer' };
+    return `Hilfeleistung Verkehrsunfall ${levels[Number(hVu[1])] || hVu[1]}`;
+  }
+
+  const brand = value.match(/^B\s*([0-9]+)$/i);
+  if (brand) {
+    const numbers = ['null', 'eins', 'zwei', 'drei', 'vier', 'fünf', 'sechs', 'sieben', 'acht', 'neun'];
+    const spoken = brand[1].split('').map(d => numbers[Number(d)] ?? d).join(' ');
+    return `Brand ${spoken}`;
+  }
+
+  if (/^V\s*U$/i.test(value)) return 'Verkehrsunfall';
+
+  const vu = value.match(/^V\s*U\s*[- ]?([0-9]+)$/i);
+  if (vu) {
+    const levels = { 1: 'klein', 2: 'mittel', 3: 'schwer' };
+    return `Verkehrsunfall ${levels[Number(vu[1])] || vu[1]}`;
+  }
+
+  return value;
+}
+
 function parseHashFields(text) {
   const firstLine = text.split(/\r?\n/)[0];
   const parts = firstLine.split('#').map(p => p.trim());
 
-  const stichwort    = parts[0] || '';
+  const stichwort    = normalizeStichwort(parts[0] || '');
   const beschreibung = parts[1] || '';
   const adresse      = parts[2] || '';
   const bemerkungRaw = parts.slice(5).filter(Boolean).join(', ');
@@ -102,13 +102,11 @@ function parseHashFields(text) {
   let adresseBase   = adresse;
   let adresseZusatz = bemerkung;
 
-  // Spitze Klammern <Objekt>
   const spitzMatch = adresse.match(/^(.+?)\s*<([^>]+)>\s*$/);
   if (spitzMatch) {
     adresseBase   = spitzMatch[1].trim();
     adresseZusatz = [spitzMatch[2].trim(), bemerkung].filter(Boolean).join(', ');
   } else {
-    // Runde Klammern (Zusatz)
     const rundMatch = adresse.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
     if (rundMatch) {
       adresseBase   = rundMatch[1].trim();
@@ -119,15 +117,6 @@ function parseHashFields(text) {
   return { stichwort, beschreibung, adresseBase, adresseZusatz };
 }
 
-/**
- * Extrahiert alle Alarminfos aus dem Rohtext.
- *
- * Rückgabe:
- *   stichwort           - Roher Code, NICHT durch alarmMapping jagen
- *   beschreibung        - Freitext, Abkürzungen auflösen
- *   location            - Adresse
- *   locationAdditional  - Objekt + Bemerkung
- */
 function extractAlarmInfo(rawText) {
   if (isHashFormat(rawText)) {
     const { stichwort, beschreibung, adresseBase, adresseZusatz } = parseHashFields(rawText);
@@ -139,15 +128,13 @@ function extractAlarmInfo(rawText) {
     };
   }
 
-  // Mehrzeiliges Label-Format
   const lines = rawText.split(/\r?\n/).map(l => l.trim());
-
-  let stichwort              = '';
-  let locationLines          = [];
+  let stichwort               = '';
+  let locationLines           = [];
   let locationAdditionalLines = [];
-  let inLocation             = false;
-  let inLocationAdditional   = false;
-  let inRemovedSection       = false;
+  let inLocation              = false;
+  let inLocationAdditional    = false;
+  let inRemovedSection        = false;
 
   for (const line of lines) {
     if (!line) {
@@ -156,8 +143,8 @@ function extractAlarmInfo(rawText) {
     }
 
     if (SECTION_PATTERNS.some(p => p.test(line))) {
-      inRemovedSection     = true;
-      inLocation           = false;
+      inRemovedSection = true;
+      inLocation = false;
       inLocationAdditional = false;
       continue;
     }
@@ -173,14 +160,14 @@ function extractAlarmInfo(rawText) {
 
     if (ORT_ADDITIONAL_PATTERN.test(line)) {
       inLocationAdditional = true;
-      inLocation           = false;
+      inLocation = false;
       const val = line.replace(ORT_ADDITIONAL_PATTERN, '').trim();
       if (val) locationAdditionalLines.push(val);
       continue;
     }
 
     if (ORT_PATTERN.test(line)) {
-      inLocation           = true;
+      inLocation = true;
       inLocationAdditional = false;
       continue;
     }
@@ -195,14 +182,14 @@ function extractAlarmInfo(rawText) {
     } else if (inLocation) {
       locationLines.push(line);
     } else if (!stichwort) {
-      stichwort = line;
+      stichwort = normalizeStichwort(line);
     }
   }
 
   return {
-    stichwort:          stichwort.trim(),
-    beschreibung:       '',
-    location:           locationLines.filter(Boolean).join(', ').trim(),
+    stichwort: stichwort.trim(),
+    beschreibung: '',
+    location: locationLines.filter(Boolean).join(', ').trim(),
     locationAdditional: locationAdditionalLines.filter(Boolean).join(', ').trim(),
   };
 }
@@ -211,7 +198,7 @@ function extractOrtZusatz(addressLine) {
   const match = addressLine.match(ORT_INLINE_ZUSATZ_PATTERN);
   if (!match) return { base: addressLine.trim(), zusatz: '' };
   const zusatz = match[0].trim();
-  const base   = addressLine.slice(0, addressLine.lastIndexOf(zusatz)).trim();
+  const base = addressLine.slice(0, addressLine.lastIndexOf(zusatz)).trim();
   return { base, zusatz };
 }
 
@@ -230,4 +217,5 @@ module.exports = {
   deduplicateRoadRefs,
   isHashFormat,
   parseHashFields,
+  normalizeStichwort,
 };
