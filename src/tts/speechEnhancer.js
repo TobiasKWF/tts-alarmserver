@@ -5,7 +5,7 @@
  */
 
 const { cleanUnicode } = require('../utils/unicode');
-const { replaceNumbers } = require('../utils/numbers');
+const { replaceNumbers, numberToWords } = require('../utils/numbers');
 const { replaceRoadCodes, replaceAbbreviations } = require('./mappings/roadMapping');
 
 const POSTAL_CODE_DIGITS = {
@@ -119,6 +119,12 @@ function enhanceLocation(text) {
   r = replaceRoadCodes(r);
   r = replaceAbbreviations(r);
   r = replaceNumbers(r);
+
+  // Hausnummern werden mit „eins“ statt „ein“ gesprochen.
+  // Dadurch wird z. B. „Kreuzweg 1“ zu „Kreuzweg eins“, ohne die
+  // allgemeine Zahlumwandlung (z. B. „ein Fahrzeug“) zu verändern.
+  r = r.replace(/\b([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß .'-]*)\s+ein\b(?=\s*(?:,|\.|\(|$))/g, '$1 eins');
+
   return r.replace(/\s+/g, ' ').replace(/,\s*,/g, ',').trim();
 }
 
