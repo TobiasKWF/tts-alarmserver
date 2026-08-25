@@ -36,10 +36,6 @@
           <label for="announce-text">Text <span class="required">*</span></label>
           <textarea id="announce-text" rows="6" placeholder="Text eingeben, der über die Alarmanlage vorgelesen werden soll ..." maxlength="2000" autofocus></textarea>
         </div>
-        <div class="form-group">
-          <label for="announce-priority">Priorität</label>
-          <input type="number" id="announce-priority" min="1" max="10" value="5" />
-        </div>
         <div id="announce-modal-error" class="modal-error hidden"></div>
       </div>
       <div class="modal-footer">
@@ -79,34 +75,28 @@
   </div>
 
   <main class="grid">
-
-    <!-- Serverstatus -->
     <section class="card" id="card-status">
       <h2>Serverstatus</h2>
       <dl>
-        <dt>Uptime</dt>       <dd id="stat-uptime">–</dd>
-        <dt>RAM</dt>          <dd id="stat-ram">–</dd>
-        <dt>WS-Clients</dt>   <dd id="stat-ws">–</dd>
+        <dt>Uptime</dt><dd id="stat-uptime">–</dd>
+        <dt>RAM</dt><dd id="stat-ram">–</dd>
+        <dt>WS-Clients</dt><dd id="stat-ws">–</dd>
       </dl>
     </section>
 
-    <!-- Aktuelle Durchsage -->
     <section class="card" id="card-speech">
       <h2>Aktuelle Durchsage</h2>
       <div id="speech-empty" class="empty">Keine aktive Durchsage</div>
       <div id="speech-detail" class="hidden">
         <p id="speech-text"></p>
         <dl>
-          <dt>Alarm-ID</dt> <dd id="speech-alarm-id"></dd>
-          <dt>Stimme</dt>   <dd id="speech-voice"></dd>
+          <dt>Alarm-ID</dt><dd id="speech-alarm-id"></dd>
+          <dt>Stimme</dt><dd id="speech-voice"></dd>
         </dl>
-        <div class="progress-wrap">
-          <div class="progress-bar" id="speech-progress"></div>
-        </div>
+        <div class="progress-wrap"><div class="progress-bar" id="speech-progress"></div></div>
       </div>
     </section>
 
-    <!-- Warteschlange -->
     <section class="card" id="card-queue">
       <h2>Warteschlange</h2>
       <div id="queue-empty" class="empty">Warteschlange leer</div>
@@ -116,7 +106,6 @@
       </table>
     </section>
 
-    <!-- Alarmhistorie -->
     <section class="card" id="card-history">
       <h2>Alarmhistorie <small id="history-count"></small></h2>
       <div id="history-empty" class="empty">Noch keine Eintraege</div>
@@ -126,13 +115,11 @@
       </table>
     </section>
 
-    <!-- Fehlerlog -->
     <section class="card" id="card-errors">
       <h2>Fehlerlog <small id="error-count"></small></h2>
       <div id="errors-empty" class="empty">Keine Fehler</div>
       <ul id="errors-list" class="hidden"></ul>
     </section>
-
   </main>
 
   <script src="/dashboard/dashboard.js"></script>
