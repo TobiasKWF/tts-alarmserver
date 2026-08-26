@@ -1,89 +1,54 @@
 'use strict';
 
-/**
- * Express-Anwendung: Middleware, Routen und globale Fehlerbehandlung.
- */
-
-const express        = require('express');
-const path           = require('path');
-const { helmetMiddleware }                            = require('./middleware/helmetMiddleware');
-const { corsMiddleware }                              = require('./middleware/corsMiddleware');
-const { sanitize }                                   = require('./middleware/sanitize');
-const { globalLimiter, announceLimiter,
-        diveraLimiter }                              = require('./middleware/rateLimiter');
-const requestLogger  = require('./middleware/requestLogger');
-const errorHandler   = require('./middleware/errorHandler');
-const alarmRoutes    = require('./routes/alarm');
+const express = require('express');
+const path = require('path');
+const { helmetMiddleware } = require('./middleware/helmetMiddleware');
+const { corsMiddleware } = require('./middleware/corsMiddleware');
+const { sanitize } = require('./middleware/sanitize');
+const { globalLimiter, announceLimiter, diveraLimiter } = require('./middleware/rateLimiter');
+const requestLogger = require('./middleware/requestLogger');
+const errorHandler = require('./middleware/errorHandler');
+const alarmRoutes = require('./routes/alarm');
 const announceRoutes = require('./routes/announce');
-const statusRoutes   = require('./routes/status');
-const historyRoutes  = require('./routes/history');
-const statsRoutes    = require('./routes/stats');
-const healthRoutes   = require('./routes/health');
-const voicesRoutes   = require('./routes/voices');
-const diveraRoutes   = require('./routes/divera');
+const statusRoutes = require('./routes/status');
+const historyRoutes = require('./routes/history');
+const statsRoutes = require('./routes/stats');
+const healthRoutes = require('./routes/health');
+const voicesRoutes = require('./routes/voices');
+const diveraRoutes = require('./routes/divera');
 const dashboardRoute = require('./routes/dashboard');
-const logger         = require('./logging/logger');
+const alarmKeywordsRoutes = require('./routes/alarmKeywords');
 
 const app = express();
-
-// Vertrauenswürdige Proxies aktivieren damit express-rate-limit die echte
-// Client-IP aus X-Forwarded-For lesen kann (z.B. hinter nginx / Traefik).
 app.set('trust proxy', 1);
-
-// Helmet – setzt sichere HTTP-Response-Header (X-Content-Type-Options,
-// X-Frame-Options, Referrer-Policy, COOP u.v.m.).
-// Muss als erstes Middleware registriert sein.
 app.use(helmetMiddleware);
-
-// CORS – muss vor allen Routen registriert sein, damit Preflight-Requests
-// (OPTIONS) korrekt beantwortet werden.
 app.use(corsMiddleware);
 app.options('*', corsMiddleware);
-
-// Body-Parser
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-
-// Eingabe-Sanitisierung – muss nach dem Body-Parser laufen (req.body ist dann
-// bereits geparst) und vor allen API-Routen, damit jede Anfrage bereinigt wird.
 app.use(sanitize);
-
-// Statische Dateien (inkl. public/dashboard/)
 app.use(express.static(path.join(__dirname, '..', 'public')));
-
-// Request-Logging
 app.use(requestLogger);
 
-// ---------------------------------------------------------------------------
-// Rate-Limiting
-// globalLimiter gilt für alle öffentlichen API- und Webhook-Endpunkte.
-// Ausgenommen: statische Assets, Dashboard und Health-/Stats-Endpunkte.
-// Zusätzlich werden /announce und /api/divera mit engeren Limits geschützt.
-// ---------------------------------------------------------------------------
-app.use('/api/alarm',   globalLimiter);
-app.use('/announce',    globalLimiter, announceLimiter);
-app.use('/api/divera',  globalLimiter, diveraLimiter);
-app.use('/api/voices',  globalLimiter);
+app.use('/api/alarm', globalLimiter);
+app.use('/announce', globalLimiter, announceLimiter);
+app.use('/api/divera', globalLimiter, diveraLimiter);
+app.use('/api/voices', globalLimiter);
+app.use('/api/alarm-keywords', globalLimiter);
 
-// Routen
-app.use('/api/alarm',    alarmRoutes);
-app.use('/announce',     announceRoutes);
-app.use('/api/status',   statusRoutes);
-app.use('/api/history',  historyRoutes);
-app.use('/api/stats',    statsRoutes);
-app.use('/api/health',   healthRoutes);
-app.use('/api/voices',   voicesRoutes);
-app.use('/api/divera',   diveraRoutes);
-
-// Dashboard – strict: false im Router deckt /dashboard und /dashboard/ ab
+app.use('/api/alarm', alarmRoutes);
+app.use('/announce', announceRoutes);
+app.use('/api/status', statusRoutes);
+app.use('/api/history', historyRoutes);
+app.use('/api/stats', statsRoutes);
+app.use('/api/health', healthRoutes);
+app.use('/api/voices', voicesRoutes);
+app.use('/api/divera', diveraRoutes);
+app.use('/api/alarm-keywords', alarmKeywordsRoutes);
 app.use('/dashboard', dashboardRoute);
 
-// 404
 app.use((req, res) => {
   res.status(404).json({ error: 'Nicht gefunden', path: req.path });
 });
-
-// Globale Fehlerbehandlung
 app.use(errorHandler);
-
 module.exports = app;
