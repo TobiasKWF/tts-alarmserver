@@ -8,16 +8,9 @@ const FANFARE_FILE = 'fanfare.wav';
 const ANNOUNCE_PRIORITY = 5;
 const HISTORY_LIMIT = 10;
 
-let ws = null;
-let reconnectDelay = RECONNECT_BASE;
-let reconnectTimer = null;
-let uptimeBase = null;
-let progressTimer = null;
-let speechStartedAt = null;
-let speechDuration = null;
-let fanfareTimer = null;
-let announceTimer = null;
-
+let ws = null, reconnectDelay = RECONNECT_BASE, reconnectTimer = null;
+let uptimeBase = null, progressTimer = null, speechStartedAt = null, speechDuration = null;
+let fanfareTimer = null, announceTimer = null;
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
@@ -26,16 +19,11 @@ const savedTheme = localStorage.getItem('dashboard-theme');
 if (savedTheme) html.dataset.theme = savedTheme;
 $('theme-toggle').addEventListener('click', () => { const next = html.dataset.theme === 'dark' ? 'light' : 'dark'; html.dataset.theme = next; localStorage.setItem('dashboard-theme', next); $('theme-toggle').textContent = next === 'dark' ? '\uD83C\uDF19' : '\u2600\uFE0F'; });
 
-const btnAnnounce = $('btn-announce');
-const btnAnnounceLabel = $('btn-announce-label');
-const announceModal = $('announce-modal');
-const announceError = $('announce-modal-error');
-const announceSubmit = $('announce-modal-submit');
+const btnAnnounce = $('btn-announce'), btnAnnounceLabel = $('btn-announce-label'), announceModal = $('announce-modal'), announceError = $('announce-modal-error'), announceSubmit = $('announce-modal-submit');
 function openAnnounceModal() { announceError.classList.add('hidden'); announceError.textContent = ''; announceSubmit.disabled = false; announceSubmit.textContent = '\uD83D\uDD0A Durchsage starten'; announceModal.classList.remove('hidden'); $('announce-text').focus(); }
 function closeAnnounceModal() { announceModal.classList.add('hidden'); }
 btnAnnounce.addEventListener('click', openAnnounceModal);
-$('announce-modal-close').addEventListener('click', closeAnnounceModal);
-$('announce-modal-cancel').addEventListener('click', closeAnnounceModal);
+$('announce-modal-close').addEventListener('click', closeAnnounceModal); $('announce-modal-cancel').addEventListener('click', closeAnnounceModal);
 announceModal.addEventListener('click', e => { if (e.target === announceModal) closeAnnounceModal(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !announceModal.classList.contains('hidden')) closeAnnounceModal(); });
 $('announce-text').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); announceSubmit.click(); } });
@@ -44,11 +32,10 @@ announceSubmit.addEventListener('click', async () => {
   if (!text) { announceError.textContent = 'Bitte einen Text für die Durchsage eingeben.'; announceError.classList.remove('hidden'); $('announce-text').focus(); return; }
   if (text.length > 2000) { announceError.textContent = 'Der Text darf maximal 2000 Zeichen enthalten.'; announceError.classList.remove('hidden'); $('announce-text').focus(); return; }
   announceSubmit.disabled = true; announceSubmit.textContent = '\u23F3 Wird eingereiht...';
-  try { const res = await fetch('/announce', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, priority: ANNOUNCE_PRIORITY }) }); const json = await res.json().catch(() => ({})); if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`); closeAnnounceModal(); $('announce-text').value = ''; btnAnnounce.disabled = true; btnAnnounce.className = 'btn-fanfare state-ok'; btnAnnounceLabel.textContent = '\u2713 Durchsage gestartet'; clearTimeout(announceTimer); announceTimer = setTimeout(() => { btnAnnounce.disabled = false; btnAnnounce.className = 'btn-fanfare'; btnAnnounceLabel.textContent = 'Durchsage'; }, 3000); } catch (err) { announceSubmit.disabled = false; announceSubmit.textContent = '\uD83D\uDD0A Durchsage starten'; announceError.textContent = `Durchsage konnte nicht gestartet werden: ${err.message}`; announceError.classList.remove('hidden'); }
+  try { const res = await fetch('/announce', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, priority: ANNOUNCE_PRIORITY }) }); const json = await res.json().catch(() => ({})); if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`); closeAnnounceModal(); $('announce-text').value = ''; btnAnnounce.disabled = true; btnAnnounce.className = 'btn-fanfare state-ok'; btnAnnounceLabel.textContent = '\u2713 Durchsage gestartet'; clearTimeout(announceTimer); announceTimer = setTimeout(() => { btnAnnounce.disabled = false; btnAnnounce.className = 'btn-fanfare'; btnAnnounceLabel.textContent = 'Durchsage'; }, 3000); } catch (err) { announceSubmit.disabled = false; announceSubmit.textContent = '\uD83D\DD0A Durchsage starten'; announceError.textContent = `Durchsage konnte nicht gestartet werden: ${err.message}`; announceError.classList.remove('hidden'); }
 });
 
-const btnFanfare = $('btn-fanfare');
-const btnFanfareLabel = $('btn-fanfare-label');
+const btnFanfare = $('btn-fanfare'), btnFanfareLabel = $('btn-fanfare-label');
 btnFanfare.addEventListener('click', async () => {
   if (btnFanfare.disabled) return;
   clearTimeout(fanfareTimer); btnFanfare.disabled = true; btnFanfare.className = 'btn-fanfare'; btnFanfareLabel.textContent = 'Spiele\u2026';
@@ -56,24 +43,48 @@ btnFanfare.addEventListener('click', async () => {
   fanfareTimer = setTimeout(() => { btnFanfare.disabled = false; btnFanfare.className = 'btn-fanfare'; btnFanfareLabel.textContent = 'Fanfare'; }, 2500);
 });
 
-const modal = $('alarm-modal');
-const btnAlarm = $('btn-alarm');
-const btnAlarmLbl = $('btn-alarm-label');
-const modalError = $('alarm-modal-error');
-const submitBtn = $('modal-submit');
+const modal = $('alarm-modal'), btnAlarm = $('btn-alarm'), btnAlarmLbl = $('btn-alarm-label'), modalError = $('alarm-modal-error'), submitBtn = $('modal-submit'), alarmTitle = $('alarm-title');
 let alarmTimer = null;
-function openModal() { $('alarm-title').value = ''; $('alarm-text').value = ''; $('alarm-address').value = ''; modalError.classList.add('hidden'); modalError.textContent = ''; submitBtn.disabled = false; submitBtn.textContent = '\uD83D\uDEA8 Alarm auslösen'; modal.classList.remove('hidden'); $('alarm-title').focus(); }
+let alarmKeywordsLoaded = false;
+
+async function loadAlarmKeywords() {
+  if (alarmKeywordsLoaded) return;
+  try {
+    const res = await fetch('/api/alarm-keywords');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const items = await res.json();
+    alarmTitle.innerHTML = '<option value="">Stichwort auswählen ...</option>';
+    for (const item of items) {
+      const option = document.createElement('option');
+      option.value = item.code;
+      option.textContent = `${item.code} – ${item.label}`;
+      alarmTitle.appendChild(option);
+    }
+    alarmKeywordsLoaded = true;
+  } catch (err) {
+    alarmTitle.innerHTML = '<option value="">Stichworte konnten nicht geladen werden</option>';
+    modalError.textContent = `Alarmstichworte konnten nicht geladen werden: ${err.message}`;
+    modalError.classList.remove('hidden');
+  }
+}
+
+function openModal() {
+  alarmTitle.value = '';
+  $('alarm-text').value = '';
+  $('alarm-address').value = '';
+  modalError.classList.add('hidden'); modalError.textContent = '';
+  submitBtn.disabled = false; submitBtn.textContent = '\uD83D\uDEA8 Alarm auslösen';
+  modal.classList.remove('hidden');
+  loadAlarmKeywords().then(() => alarmTitle.focus());
+}
 function closeModal() { modal.classList.add('hidden'); }
 btnAlarm.addEventListener('click', openModal);
 $('modal-close').addEventListener('click', closeModal); $('modal-cancel').addEventListener('click', closeModal);
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal(); });
 modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
 submitBtn.addEventListener('click', () => {
-  const title = $('alarm-title').value.trim(), text = $('alarm-text').value.trim(), address = $('alarm-address').value.trim();
-  if (!title) { modalError.textContent = 'Bitte ein Alarmstichwort eingeben.'; modalError.classList.remove('hidden'); $('alarm-title').focus(); return; }
-  // Stichwort und Beschreibung werden getrennt übergeben. So erkennt die gemeinsame
-  // Alarmaufbereitung z.B. B 2Y sicher als Stichwort und kann es zu
-  // "Brand zwei mit Menschenleben in Gefahr" umwandeln.
+  const title = alarmTitle.value.trim(), text = $('alarm-text').value.trim(), address = $('alarm-address').value.trim();
+  if (!title) { modalError.textContent = 'Bitte ein Alarmstichwort auswählen.'; modalError.classList.remove('hidden'); alarmTitle.focus(); return; }
   let rawText = title;
   if (text) rawText += '\n' + text;
   if (address) rawText += '\n\nOrt:\n' + address;
