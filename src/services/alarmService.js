@@ -87,11 +87,13 @@ async function processAlarm(rawText, requestId) {
 
     const endTime = Date.now();
     logAlarm({ requestId, startTime, endTime, cleanText, spokenText, success: true });
-    historyService.add({ requestId, startTime, endTime, cleanText, spokenText, success: true });
+    historyService.add({ requestId, startTime, endTime, cleanText, spokenText, rawText, source: 'alarm', success: true });
     dashState.clearCurrentSpeech();
     dashState.addToHistory({
       alarmId:    requestId,
       text:       spokenText,
+      rawText,
+      source:     'alarm',
       voice:      (process.env.PIPER_MODEL || 'piper').split('/').pop(),
       finishedAt: endTime,
       success:    true,
@@ -102,9 +104,9 @@ async function processAlarm(rawText, requestId) {
   } catch (err) {
     const endTime = Date.now();
     logAlarm({ requestId, startTime, endTime, cleanText, spokenText, success: false, error: err.message });
-    historyService.add({ requestId, startTime, endTime, cleanText, spokenText, success: false, error: err.message });
+    historyService.add({ requestId, startTime, endTime, cleanText, spokenText, rawText, source: 'alarm', success: false, error: err.message });
     dashState.clearCurrentSpeech();
-    dashState.addToHistory({ alarmId: requestId, text: spokenText || cleanText, finishedAt: endTime, success: false });
+    dashState.addToHistory({ alarmId: requestId, text: spokenText || cleanText, rawText, source: 'alarm', finishedAt: endTime, success: false });
     dashState.addError({ message: err.message, ts: new Date().toISOString() });
     throw err;
   } finally {
