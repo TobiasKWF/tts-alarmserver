@@ -10,7 +10,7 @@ const HISTORY_LIMIT = 10;
 
 let ws = null, reconnectDelay = RECONNECT_BASE, reconnectTimer = null;
 let uptimeBase = null, progressTimer = null, speechStartedAt = null, speechDuration = null;
-let fanfareTimer = null, announceTimer = null;
+let fanfareTimer = null, announceTimer = null, repeatLastTimer = null;
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
@@ -19,8 +19,37 @@ const savedTheme = localStorage.getItem('dashboard-theme');
 if (savedTheme) html.dataset.theme = savedTheme;
 $('theme-toggle').addEventListener('click', () => { const next = html.dataset.theme === 'dark' ? 'light' : 'dark'; html.dataset.theme = next; localStorage.setItem('dashboard-theme', next); $('theme-toggle').textContent = next === 'dark' ? '\uD83C\uDF19' : '\u2600\uFE0F'; });
 
+const btnRepeatLast = $('btn-repeat-last'), btnRepeatLastLabel = $('btn-repeat-last-label');
+function updateRepeatLastButton(items) {
+  const latestAlarm = (items || []).find(it => it.source === 'alarm' && it.success !== false && typeof it.rawText === 'string' && it.rawText.trim());
+  btnRepeatLast.disabled = !latestAlarm;
+}
+btnRepeatLast.addEventListener('click', async () => {
+  if (btnRepeatLast.disabled) return;
+  clearTimeout(repeatLastTimer);
+  btnRepeatLast.disabled = true;
+  btnRepeatLast.className = 'btn-fanfare state-sending';
+  btnRepeatLastLabel.textContent = 'Wird eingereiht\u2026';
+  try {
+    const res = await fetch('/api/alarm/repeat-last', { method: 'POST' });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+    btnRepeatLast.className = 'btn-fanfare state-ok';
+    btnRepeatLastLabel.textContent = '\u2713 Wiederholung gestartet';
+  } catch (err) {
+    btnRepeatLast.className = 'btn-fanfare state-err';
+    btnRepeatLastLabel.textContent = '\u2717 ' + err.message;
+  } finally {
+    repeatLastTimer = setTimeout(() => {
+      btnRepeatLast.className = 'btn-fanfare';
+      btnRepeatLastLabel.textContent = 'Letzte Alarmierung';
+      btnRepeatLast.disabled = false;
+    }, 3500);
+  }
+});
+
 const btnAnnounce = $('btn-announce'), btnAnnounceLabel = $('btn-announce-label'), announceModal = $('announce-modal'), announceError = $('announce-modal-error'), announceSubmit = $('announce-modal-submit');
-function openAnnounceModal() { announceError.classList.add('hidden'); announceError.textContent = ''; announceSubmit.disabled = false; announceSubmit.textContent = '\uD83D\uDD0A Durchsage starten'; announceModal.classList.remove('hidden'); $('announce-text').focus(); }
+function openAnnounceModal() { announceError.classList.add('hidden'); announceError.textContent = ''; announceSubmit.disabled = false; announceSubmit.textContent = '\uD83D\DD0A Durchsage starten'; announceModal.classList.remove('hidden'); $('announce-text').focus(); }
 function closeAnnounceModal() { announceModal.classList.add('hidden'); }
 btnAnnounce.addEventListener('click', openAnnounceModal);
 $('announce-modal-close').addEventListener('click', closeAnnounceModal); $('announce-modal-cancel').addEventListener('click', closeAnnounceModal);
@@ -106,7 +135,7 @@ function tickUptime() { const secs = Math.floor((Date.now() - uptimeBase) / 1000
 function applySpeech(sp) { if (!sp) { clearSpeech(); return; } $('speech-empty').classList.add('hidden'); $('speech-detail').classList.remove('hidden'); $('speech-text').textContent = sp.text || ''; $('speech-alarm-id').textContent = sp.alarmId || ''; $('speech-voice').textContent = sp.voice || ''; clearInterval(progressTimer); if (sp.startedAt && sp.durationMs) { speechStartedAt = sp.startedAt; speechDuration = sp.durationMs; progressTimer = setInterval(() => { const pct = Math.min(100, (Date.now() - speechStartedAt) / speechDuration * 100); $('speech-progress').style.width = pct + '%'; if (pct >= 100) clearInterval(progressTimer); }, 200); } }
 function clearSpeech() { clearInterval(progressTimer); $('speech-progress').style.width = '0%'; $('speech-detail').classList.add('hidden'); $('speech-empty').classList.remove('hidden'); }
 function applyQueue(items) { const body = $('queue-body'); if (!items || items.length === 0) { $('queue-table').classList.add('hidden'); $('queue-empty').classList.remove('hidden'); return; } $('queue-empty').classList.add('hidden'); $('queue-table').classList.remove('hidden'); body.innerHTML = items.map(it => `<tr><td class="${it.priority <= 2 ? 'prio-high' : 'prio-normal'}">${esc(it.priority ?? 5)}</td><td style="font-size:11px;color:var(--text-muted)">${esc((it.id || '').slice(0,8))}</td><td>${esc(it.source || 'api')}</td><td>${esc(it.text || '')}</td></tr>`).join(''); }
-function applyHistory(items) { const body = $('history-body'); if (!items || items.length === 0) { $('history-table').classList.add('hidden'); $('history-empty').classList.remove('hidden'); $('history-count').textContent = ''; return; } const latest = items.slice(0, HISTORY_LIMIT); $('history-empty').classList.add('hidden'); $('history-table').classList.remove('hidden'); $('history-count').textContent = `(${latest.length})`; body.innerHTML = latest.map(it => { const ok = it.success !== false; const time = it.finishedAt ? new Date(it.finishedAt).toLocaleTimeString('de-DE') : ''; return `<tr><td style="white-space:nowrap;font-size:12px;color:var(--text-muted)">${esc(time)}</td><td style="font-size:11px;color:var(--text-muted)">${esc((it.alarmId||'').slice(0,8))}</td><td>${esc(it.text || '')}</td><td style="color:${ok ? 'var(--success)' : 'var(--danger)'}">${ok ? '\u2713' : '\u2717'}</td></tr>`; }).join(''); }
+function applyHistory(items) { const body = $('history-body'); updateRepeatLastButton(items); if (!items || items.length === 0) { $('history-table').classList.add('hidden'); $('history-empty').classList.remove('hidden'); $('history-count').textContent = ''; return; } const latest = items.slice(0, HISTORY_LIMIT); $('history-empty').classList.add('hidden'); $('history-table').classList.remove('hidden'); $('history-count').textContent = `(${latest.length})`; body.innerHTML = latest.map(it => { const ok = it.success !== false; const time = it.finishedAt ? new Date(it.finishedAt).toLocaleTimeString('de-DE') : ''; return `<tr><td style="white-space:nowrap;font-size:12px;color:var(--text-muted)">${esc(time)}</td><td style="font-size:11px;color:var(--text-muted)">${esc((it.alarmId||'').slice(0,8))}</td><td>${esc(it.text || '')}</td><td style="color:${ok ? 'var(--success)' : 'var(--danger)'}">${ok ? '\u2713' : '\u2717'}</td></tr>`; }).join(''); }
 function applyErrors(items) { const list = $('errors-list'); if (!items || items.length === 0) { list.classList.add('hidden'); $('errors-empty').classList.remove('hidden'); $('error-count').textContent = ''; return; } $('errors-empty').classList.add('hidden'); list.classList.remove('hidden'); $('error-count').textContent = `(${items.length})`; list.innerHTML = items.slice().reverse().map(it => { const time = it.ts ? new Date(it.ts).toLocaleTimeString('de-DE') : ''; return `<li><span class="err-time">${esc(time)}</span>${esc(it.message || it.error || String(it))}</li>`; }).join(''); }
 function setStatus(state) { const el = $('ws-status'); el.className = 'badge badge--' + state; el.textContent = { connected: 'Verbunden', reconnecting: 'Verbinde...', disconnected: 'Getrennt' }[state] || state; }
 function formatUptime(s) { const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60; if (d > 0) return `${d}d ${h}h ${m}m`; if (h > 0) return `${h}h ${m}m ${sec}s`; return `${m}m ${sec}s`; }
