@@ -22,6 +22,14 @@ function replacePostalCodes(text) {
 function enhanceStichwort(text) {
   let r = cleanUnicode(text).trim();
 
+  // Sonderformat aus der Leitstellenmeldung:
+  // "H H VU-ein - VU mit VP" → natürliche TTS-Ausgabe.
+  // Die eigentliche Information ist Verkehrsunfall mit verletzter Person;
+  // interne/technische Präfixe werden nicht mitgesprochen.
+  if (/^H\s+H\s+VU\s*[- ]?(?:ein|1)\s*[- ]+VU\s+mit\s+VP$/i.test(r)) {
+    return 'Verkehrsunfall mit verletzter Person';
+  }
+
   const hVuMatch = r.match(/^H\s*V\s*U\s*[- ]?([0-9]+)(Y)?$/i);
   if (hVuMatch) {
     const level = parseInt(hVuMatch[1], 10);
