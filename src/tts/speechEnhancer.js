@@ -5,7 +5,7 @@
  */
 
 const { cleanUnicode } = require('../utils/unicode');
-const { replaceNumbers, numberToWords } = require('../utils/numbers');
+const { replaceNumbers } = require('../utils/numbers');
 const { replaceRoadCodes, replaceAbbreviations } = require('./mappings/roadMapping');
 
 const POSTAL_CODE_DIGITS = {
@@ -22,12 +22,23 @@ function replacePostalCodes(text) {
 function enhanceStichwort(text) {
   let r = cleanUnicode(text).trim();
 
-  // Sonderformat aus der Leitstellenmeldung:
-  // "H H VU-1 - VU mit VP" (bzw. ein/eins/zwei/...) → natürliche TTS-Ausgabe.
-  // Der erste VU-Code ist ein internes Zusatzmerkmal; entscheidend ist
-  // der zweite Teil "VU mit VP".
-  if (/^H\s+H\s+VU\s*[- ]?(?:ein|eins|1|zwei|2|drei|3|vier|4|fünf|5|sechs|6|sieben|7|acht|8|neun|9)\s*[-–—]\s*VU\s+mit\s+VP$/i.test(r)) {
-    return 'Verkehrsunfall mit verletzter Person';
+  // Sonderformat der Leitstellenmeldung: H H VU-1 - VU mit VP
+  // bedeutet Hilfeleistung Verkehrsunfall klein plus verletzte Person.
+  const hHVuMatch = r.match(/^H\s+H\s+VU\s*[- ]?(ein|eins|1|zwei|2|drei|3|vier|4|fünf|5|sechs|6|sieben|7|acht|8|neun|9)\s*[-–—]\s*VU\s+mit\s+VP$/i);
+  if (hHVuMatch) {
+    const levelMap = {
+      ein: 'klein', eins: 'klein', 1: 'klein',
+      zwei: 'mittel', 2: 'mittel',
+      drei: 'groß', 3: 'groß',
+      vier: 'vier', 4: 'vier',
+      fünf: 'fünf', 5: 'fünf',
+      sechs: 'sechs', 6: 'sechs',
+      sieben: 'sieben', 7: 'sieben',
+      acht: 'acht', 8: 'acht',
+      neun: 'neun', 9: 'neun',
+    };
+    const level = levelMap[hHVuMatch[1].toLowerCase()];
+    return `Hilfeleistung Verkehrsunfall ${level}, Verkehrsunfall mit verletzter Person`;
   }
 
   const hVuMatch = r.match(/^H\s*V\s*U\s*[- ]?([0-9]+)(Y)?$/i);
@@ -41,13 +52,8 @@ function enhanceStichwort(text) {
     return 'Hilfeleistung Verkehrsunfall ' + (levels[level] || replaceNumbers(String(level)));
   }
 
-  if (/^H\s*1Y$/i.test(r)) {
-    return 'Hilfeleistung klein mit Person in Gefahr';
-  }
-
-  if (/^H\s*GAS$/i.test(r)) {
-    return 'Hilfeleistung Gas';
-  }
+  if (/^H\s*1Y$/i.test(r)) return 'Hilfeleistung klein mit Person in Gefahr';
+  if (/^H\s*GAS$/i.test(r)) return 'Hilfeleistung Gas';
 
   const hOilMatch = r.match(/^H\s*ÖL\s*[- ]?([0-9]+)$/i);
   if (hOilMatch) {
@@ -64,9 +70,7 @@ function enhanceStichwort(text) {
   }
 
   const brandMatch = r.match(/^B\s*([0-9]+)$/i);
-  if (brandMatch) {
-    return 'Brand ' + replaceNumbers(brandMatch[1]);
-  }
+  if (brandMatch) return 'Brand ' + replaceNumbers(brandMatch[1]);
 
   const brandYMatch = r.match(/^B\s*([0-9]+)Y$/i);
   if (brandYMatch) {
@@ -75,21 +79,10 @@ function enhanceStichwort(text) {
     return 'Brand ' + (levels[level] || replaceNumbers(String(level))) + ' mit Menschenleben in Gefahr';
   }
 
-  if (/^B\s*WALD\s*[- ]?1$/i.test(r)) {
-    return 'Brand Wald klein';
-  }
-
-  if (/^B\s*BMA$/i.test(r)) {
-    return 'Brand Brandmeldeanlage';
-  }
-
-  if (/^U\s*WASSER$/i.test(r)) {
-    return 'Unwetter';
-  }
-
-  if (/^V\s*U$/i.test(r)) {
-    return 'Verkehrsunfall';
-  }
+  if (/^B\s*WALD\s*[- ]?1$/i.test(r)) return 'Brand Wald klein';
+  if (/^B\s*BMA$/i.test(r)) return 'Brand Brandmeldeanlage';
+  if (/^U\s*WASSER$/i.test(r)) return 'Unwetter';
+  if (/^V\s*U$/i.test(r)) return 'Verkehrsunfall';
 
   const vuMatch = r.match(/^V\s*U\s*[- ]?([0-9]+)$/i);
   if (vuMatch) {
@@ -112,46 +105,27 @@ function enhanceSpeech(text) {
 
 function enhanceLocation(text) {
   let r = cleanUnicode(text);
-
-  // WF steht im Einsatzort für Wolfenbüttel. Bei WF-Ortsteil wird der
-  // Bindestrich zur natürlichen Aussprache durch ein Leerzeichen ersetzt.
   r = r.replace(/\bWF-(?=[A-ZÄÖÜ])/gi, 'Wolfenbüttel ');
   r = r.replace(/\bWF(?=\s)/gi, 'Wolfenbüttel');
-
-  // Postleitzahlen sind für die lokale Alarmierung nicht erforderlich.
   r = r.replace(/(?<!\d)\d{5}(?!\d)\s*/g, '');
-
-  // WF-Wolfenbüttel ergibt nach der WF-Auflösung nur einmal Wolfenbüttel.
   r = r.replace(/\bWolfenbüttel\s+Wolfenbüttel\b/gi, 'Wolfenbüttel');
-
   r = replaceRoadCodes(r);
   r = replaceAbbreviations(r);
   r = replaceNumbers(r);
-
-  // Hausnummern werden mit „eins“ statt „ein“ gesprochen.
-  // Dadurch wird z. B. „Kreuzweg 1“ zu „Kreuzweg eins“, ohne die
-  // allgemeine Zahlumwandlung (z. B. „ein Fahrzeug“) zu verändern.
   r = r.replace(/\b([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß .'-]*)\s+ein\b(?=\s*(?:,|\.|\(|$))/g, '$1 eins');
-
   return r.replace(/\s+/g, ' ').replace(/,\s*,/g, ',').trim();
 }
 
 function buildAlarmSpeech(info) {
   const { stichwort, beschreibung, location, locationAdditional } = info;
   const parts = [];
-
   if (stichwort) parts.push(enhanceStichwort(stichwort) + '.');
   if (beschreibung) parts.push(enhanceSpeech(beschreibung) + '.');
-
   if (location) {
     const { deduplicateRoadRefs } = require('./alarmCleaner');
     parts.push('Einsatzort: ' + enhanceLocation(deduplicateRoadRefs(location)) + '.');
   }
-
-  if (locationAdditional) {
-    parts.push('Einsatzobjekt: ' + enhanceSpeech(locationAdditional) + '.');
-  }
-
+  if (locationAdditional) parts.push('Einsatzobjekt: ' + enhanceSpeech(locationAdditional) + '.');
   return parts.join(' ').trim();
 }
 
