@@ -23,10 +23,10 @@ function enhanceStichwort(text) {
   let r = cleanUnicode(text).trim();
 
   // Sonderformat aus der Leitstellenmeldung:
-  // "H H VU-ein - VU mit VP" → natürliche TTS-Ausgabe.
-  // Die eigentliche Information ist Verkehrsunfall mit verletzter Person;
-  // interne/technische Präfixe werden nicht mitgesprochen.
-  if (/^H\s+H\s+VU\s*[- ]?(?:ein|1)\s*[- ]+VU\s+mit\s+VP$/i.test(r)) {
+  // "H H VU-1 - VU mit VP" (bzw. ein/eins/zwei/...) → natürliche TTS-Ausgabe.
+  // Der erste VU-Code ist ein internes Zusatzmerkmal; entscheidend ist
+  // der zweite Teil "VU mit VP".
+  if (/^H\s+H\s+VU\s*[- ]?(?:ein|eins|1|zwei|2|drei|3|vier|4|fünf|5|sechs|6|sieben|7|acht|8|neun|9)\s*[-–—]\s*VU\s+mit\s+VP$/i.test(r)) {
     return 'Verkehrsunfall mit verletzter Person';
   }
 
