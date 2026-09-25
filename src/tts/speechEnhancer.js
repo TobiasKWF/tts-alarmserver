@@ -41,11 +41,14 @@ function enhanceStichwort(text) {
     return `Hilfeleistung Verkehrsunfall ${level}, Verkehrsunfall mit verletzter Person`;
   }
 
-  // Divera liefert teilweise doppelte Kategorie-Präfixe wie „B B 2“, „H H 2“ oder „B B BMA“.
-  // Diese werden nur am Anfang des Stichworts entfernt, damit normale Texte mit
-  // wiederholten Buchstaben unverändert bleiben. Die Sonderform H H VU ... wird oben behandelt.
-  while (/^([BH])\s+\1\b/i.test(r)) {
-    r = r.replace(/^([BH])\s+\1\s+/i, '$1 ');
+  // Divera liefert teilweise doppelte Kategorie-Präfixe, z. B. „B B 2“,
+  // „B BMA“, „B B BMA“ oder „H H 2“.
+  // Wenn die ersten beiden Tokens aus demselben einzelnen Buchstaben bestehen,
+  // wird nur das erste Präfix entfernt. Dadurch bleibt sowohl „B 2“ als auch
+  // „BMA“ als normales einzelnes Stichwort erhalten.
+  // Beispiele: B B 2 -> B 2, B BMA -> BMA, B B BMA -> B BMA -> BMA.
+  while (/^([A-ZÄÖÜ])\\s+\\1(?:\\s+|$)/i.test(r)) {
+    r = r.replace(/^([A-ZÄÖÜ])\\s+\\1(?:\\s+)?/i, '');
   }
 
   const hVuMatch = r.match(/^H\s*V\s*U\s*[- ]?([0-9]+)(Y)?$/i);
