@@ -24,7 +24,7 @@ function enhanceStichwort(text) {
 
   // Sonderformat der Leitstellenmeldung: H H VU-1 - VU mit VP
   // bedeutet Hilfeleistung Verkehrsunfall klein plus verletzte Person.
-  const hHVuMatch = r.match(/^H\s+H\s+VU\s*[- ]?(ein|eins|1|zwei|2|drei|3|vier|4|fünf|5|sechs|6|sieben|7|acht|8|neun|9)\s*[-–—]\s*VU\s+mit\s+VP$/i);
+  const hHVuMatch = r.match(/^H(?:\s+H)?\s+VU\s*[- ]?(ein|eins|1|zwei|2|drei|3|vier|4|fünf|5|sechs|6|sieben|7|acht|8|neun|9)\s*[-–—]\s*VU\s+mit\s+VP$/i);
   if (hHVuMatch) {
     const levelMap = {
       ein: 'klein', eins: 'klein', 1: 'klein',
@@ -39,6 +39,13 @@ function enhanceStichwort(text) {
     };
     const level = levelMap[hHVuMatch[1].toLowerCase()];
     return `Hilfeleistung Verkehrsunfall ${level}, Verkehrsunfall mit verletzter Person`;
+  }
+
+  // Divera liefert teilweise doppelte Kategorie-Präfixe wie „B B 2“, „H H 2“ oder „B B BMA“.
+  // Diese werden nur am Anfang des Stichworts entfernt, damit normale Texte mit
+  // wiederholten Buchstaben unverändert bleiben. Die Sonderform H H VU ... wird oben behandelt.
+  while (/^([BH])\s+\1\b/i.test(r)) {
+    r = r.replace(/^([BH])\s+\1\s+/i, '$1 ');
   }
 
   const hVuMatch = r.match(/^H\s*V\s*U\s*[- ]?([0-9]+)(Y)?$/i);
