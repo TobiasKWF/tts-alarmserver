@@ -80,7 +80,9 @@ function enhanceStichwort(text) {
   }
 
   if (/^B\s*WALD\s*[- ]?1$/i.test(r)) return 'Brand Wald klein';
-  if (/^B\s*BMA$/i.test(r)) return 'Brand Brandmeldeanlage';
+  if (/^B\s+B\s+BMA$/i.test(r)) return 'Brandmeldeanlage';
+  if (/^B\s+BMA$/i.test(r)) return 'Brandmeldeanlage';
+  if (/^BMA$/i.test(r)) return 'Brandmeldeanlage';
   if (/^U\s*WASSER$/i.test(r)) return 'Unwetter';
   if (/^V\s*U$/i.test(r)) return 'Verkehrsunfall';
 
